@@ -1,0 +1,8 @@
+﻿# Default ignored files
+/shelf/
+/workspace.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+/HA.iml
+/modules.xml
+/inspectionProfiles/profiles_settings.xml
