@@ -1,11 +1,11 @@
 ﻿import logging
 
-
 from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
 from homeassistant.components.climate.const import HVACMode
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import UnitOfTemperature, ATTR_TEMPERATURE
+from .const import DOMAIN
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger(DOMAIN)
 
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
@@ -23,7 +23,6 @@ class KNXPIDClimate(ClimateEntity):
 
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_hvac_modes = [HVACMode.HEAT, HVACMode.OFF]
-
     _attr_supported_features = ClimateEntityFeature.TARGET_TEMPERATURE
 
     _attr_min_temp = 5.0
@@ -39,7 +38,7 @@ class KNXPIDClimate(ClimateEntity):
         _LOGGER.debug("KNXPIDClimate entity INIT: %s", name)
 
     async def async_set_temperature(self, **kwargs) -> None:
-        temperature = kwargs.get("temperature")
+        temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
 
