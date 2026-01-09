@@ -3,9 +3,10 @@
 from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
 from homeassistant.components.climate.const import HVACMode
 from homeassistant.const import UnitOfTemperature, ATTR_TEMPERATURE
-from .const import DOMAIN
 from homeassistant.core import callback
 from homeassistant.helpers.event import async_track_state_change_event
+
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(DOMAIN)
 
@@ -63,10 +64,7 @@ class KNXPIDClimate(ClimateEntity):
     async def async_set_hvac_mode(self, hvac_mode) -> None:
         self._attr_hvac_mode = hvac_mode
 
-        _LOGGER.info(
-            "KNX PID: HVAC mode changed to %s",
-            hvac_mode,
-        )
+        _LOGGER.info("KNX PID: HVAC mode changed to %s", hvac_mode)
 
         self.async_write_ha_state()
 
@@ -79,11 +77,14 @@ class KNXPIDClimate(ClimateEntity):
 
         try:
             self._attr_current_temperature = float(new_state.state)
+
             _LOGGER.info(
                 "KNX PID Climate: temperature updated to %.1f °C",
                 self._attr_current_temperature,
             )
+
             self.async_write_ha_state()
+
         except ValueError:
             _LOGGER.warning("Invalid temperature value: %s", new_state.state)
 
