@@ -12,7 +12,7 @@ _LOGGER = logging.getLogger(DOMAIN)
 
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    _LOGGER.info("_PID_CLIMATE async_setup_platform CALLED")
+    _LOGGER.info("PID_CLIMATE async_setup_platform CALLED")
 
     async_add_entities([
         PIDClimate(
@@ -21,7 +21,7 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
     ])
 
 
-class KNXPIDClimate(ClimateEntity):
+class PIDClimate(ClimateEntity):
     """Minimal valid ClimateEntity."""
 
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
@@ -51,7 +51,7 @@ class KNXPIDClimate(ClimateEntity):
     #     self._temperature_sensor_entity_id = "sensor.teplota_obyvak_futura"
     #     self._unsub_temp = None
     #
-    #     _LOGGER.debug("KNXPIDClimate entity INIT: %s", name)
+    #     _LOGGER.debug("PIDClimate entity INIT: %s", name)
 
     async def async_set_temperature(self, **kwargs) -> None:
         """Handle target temperature change."""
