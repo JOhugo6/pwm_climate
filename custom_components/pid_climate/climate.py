@@ -32,26 +32,16 @@ class PIDClimate(ClimateEntity):
     _attr_max_temp = 30.0
     _attr_target_temperature_step = 0.5
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        self.hass = hass
-        self.entry = entry
+    def __init__(self, name: str):
+        self._attr_name = name
+        self._attr_hvac_mode = HVACMode.HEAT
+        self._attr_current_temperature = None
+        self._attr_target_temperature = 21.0
 
-        self._attr_name = entry.data["name"]
-        self._temperature_entity_id = entry.data["temperature_entity_id"]
-
-        self._current_temperature = None
+        self._temperature_sensor_entity_id = "sensor.teplota_obyvak_futura"
         self._unsub_temp = None
 
-    # def __init__(self, name: str):
-    #     self._attr_name = name
-    #     self._attr_hvac_mode = HVACMode.HEAT
-    #     self._attr_current_temperature = None
-    #     self._attr_target_temperature = 21.0
-    #
-    #     self._temperature_sensor_entity_id = "sensor.teplota_obyvak_futura"
-    #     self._unsub_temp = None
-    #
-    #     _LOGGER.debug("PIDClimate entity INIT: %s", name)
+        _LOGGER.debug("PIDClimate entity INIT: %s", name)
 
     async def async_set_temperature(self, **kwargs) -> None:
         """Handle target temperature change."""
@@ -89,7 +79,7 @@ class PIDClimate(ClimateEntity):
             self._attr_current_temperature = float(new_state.state)
 
             _LOGGER.info(
-                "PID Climate: temperature updated to %.1f °C",
+                " PID Climate: temperature updated to %.1f °C",
                 self._attr_current_temperature,
             )
 

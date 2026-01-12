@@ -1,0 +1,23 @@
+﻿{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PID Thermostat",
+        "description": "Create a new PID-controlled thermostat.",
+        "data": {
+          "name": "Thermostat name",
+          "temperature_entity": "Temperature sensor entity",
+          "humidity_entity": "Humidity sensor entity (optional)",
+          "output_entity": "Output entity (percentage)",
+
+          "min_temp": "Minimum temperature (°C)",
+          "max_temp": "Maximum temperature (°C)",
+
+          "pwm_period": "PWM period (minutes)",
+
+          "hvac_modes": "HVAC modes and target temperatures"
+        }
+      }
+    }
+  }
+}

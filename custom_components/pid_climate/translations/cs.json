@@ -1,0 +1,25 @@
+﻿{
+  "config": {
+    "step": {
+      "user": {
+        "title": "PID termostat",
+        "description": "Vytvoření nového termostatu řízeného PID regulátorem.",
+        "data": {
+          "name": "Název termostatu",
+
+          "temperature_entity": "Entita teplotního senzoru",
+          "humidity_entity": "Entita senzoru vlhkosti (volitelné)",
+          "output_entity": "Výstupní entita (procenta)",
+
+          "min_temperature": "Minimální teplota",
+          "max_temperature": "Maximální teplota",
+          "temperature_step": "Teplotní krok",
+
+          "pwm_period": "Délka PWM periody (minuty)",
+
+          "hvac_modes": "Provozní režimy HVAC a cílové teploty"
+        }
+      }
+    }
+  }
+}
