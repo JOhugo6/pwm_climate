@@ -12,11 +12,11 @@ _LOGGER = logging.getLogger(DOMAIN)
 
 
 async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    _LOGGER.info("KNX_PID_CLIMATE async_setup_platform CALLED")
+    _LOGGER.info("_PID_CLIMATE async_setup_platform CALLED")
 
     async_add_entities([
-        KNXPIDClimate(
-            name=config.get("name", "KNX PID Test")
+        PIDClimate(
+            name=config.get("name", "PID Test")
         )
     ])
 
@@ -64,7 +64,7 @@ class KNXPIDClimate(ClimateEntity):
         self._attr_target_temperature = float(temperature)
 
         _LOGGER.info(
-            "KNX PID Climate setpoint changed to %.1f °C",
+            "PID Climate setpoint changed to %.1f °C",
             self._attr_target_temperature,
         )
 
@@ -74,7 +74,7 @@ class KNXPIDClimate(ClimateEntity):
     async def async_set_hvac_mode(self, hvac_mode) -> None:
         self._attr_hvac_mode = hvac_mode
 
-        _LOGGER.info("KNX PID: HVAC mode changed to %s", hvac_mode)
+        _LOGGER.info("PID: HVAC mode changed to %s", hvac_mode)
 
         self.async_write_ha_state()
 
@@ -89,7 +89,7 @@ class KNXPIDClimate(ClimateEntity):
             self._attr_current_temperature = float(new_state.state)
 
             _LOGGER.info(
-                "KNX PID Climate: temperature updated to %.1f °C",
+                "PID Climate: temperature updated to %.1f °C",
                 self._attr_current_temperature,
             )
 
@@ -100,7 +100,7 @@ class KNXPIDClimate(ClimateEntity):
 
     async def async_added_to_hass(self) -> None:
         """Called when entity is added to HA."""
-        _LOGGER.info("KNX PID Climate added to HA: %s", self.name)
+        _LOGGER.info("PID Climate added to HA: %s", self.name)
 
         # Přihlášení k poslouchání změn teplotního senzoru
         self._unsub_temp = async_track_state_change_event(

@@ -1,11 +1,11 @@
-﻿"""KNX PID Climate integration."""
+﻿"""PID Climate integration."""
 from __future__ import annotations
 
 import logging
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 
-from .climate import KNXPIDClimate
+from .climate import PIDClimate
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 

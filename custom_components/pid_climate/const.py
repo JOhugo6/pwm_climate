@@ -1,4 +1,4 @@
 ﻿# Global constants
 
-DOMAIN = "knx_pid_climate"
+DOMAIN = "pid_climate"
 LOGGER_NAME = DOMAIN
