@@ -32,16 +32,26 @@ class KNXPIDClimate(ClimateEntity):
     _attr_max_temp = 30.0
     _attr_target_temperature_step = 0.5
 
-    def __init__(self, name: str):
-        self._attr_name = name
-        self._attr_hvac_mode = HVACMode.HEAT
-        self._attr_current_temperature = None
-        self._attr_target_temperature = 21.0
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        self.hass = hass
+        self.entry = entry
 
-        self._temperature_sensor_entity_id = "sensor.teplota_obyvak_futura"
+        self._attr_name = entry.data["name"]
+        self._temperature_entity_id = entry.data["temperature_entity_id"]
+
+        self._current_temperature = None
         self._unsub_temp = None
 
-        _LOGGER.debug("KNXPIDClimate entity INIT: %s", name)
+    # def __init__(self, name: str):
+    #     self._attr_name = name
+    #     self._attr_hvac_mode = HVACMode.HEAT
+    #     self._attr_current_temperature = None
+    #     self._attr_target_temperature = 21.0
+    #
+    #     self._temperature_sensor_entity_id = "sensor.teplota_obyvak_futura"
+    #     self._unsub_temp = None
+    #
+    #     _LOGGER.debug("KNXPIDClimate entity INIT: %s", name)
 
     async def async_set_temperature(self, **kwargs) -> None:
         """Handle target temperature change."""
