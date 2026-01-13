@@ -77,7 +77,7 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_TEMPERATURE_ENTITY):
                     selector.EntitySelector(
                         selector.EntitySelectorConfig(
-                            domain="sensor",
+                            domain=["sensor", "number"],
                         )
                     ),
 

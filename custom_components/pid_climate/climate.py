@@ -62,14 +62,38 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
-def _normalize_knx_mode_temperatures(raw: Mapping[Any, Any]) -> dict[int, float]:
-    normalized: dict[int, float] = {}
+def _merge_hvac_mode_temperatures(
+    base: dict[int, float],
+    raw: Mapping[Any, Any] | None,
+) -> dict[int, float]:
+    if not raw:
+        return base
+
     for key, value in raw.items():
         try:
-            normalized[int(key)] = float(value)
+            mode = int(key)
         except (TypeError, ValueError):
             continue
-    return normalized
+
+        if mode not in base:
+            continue
+
+        try:
+            base[mode] = float(value)
+        except (TypeError, ValueError):
+            continue
+
+    return base
+
+
+def _resolve_hvac_mode_temperatures(entry: ConfigEntry) -> dict[int, float]:
+    temperatures = dict(HVAC_MODE_DEFAULT_TEMPERATURES)
+    temperatures = _merge_hvac_mode_temperatures(temperatures, entry.data.get(CONF_HVAC_MODES))
+    temperatures = _merge_hvac_mode_temperatures(
+        temperatures,
+        entry.options.get(CONF_HVAC_MODES),
+    )
+    return temperatures
 
 
 def _parse_temperature_state(state: State | None) -> float | None:
@@ -119,18 +143,11 @@ class PIDClimate(ClimateEntity):
         self._attr_unique_id = entry.entry_id
         self._attr_name = entry.data.get(CONF_NAME, entry.title)
 
-        self._temperature_entity_id: str = entry.options.get(
-            CONF_TEMPERATURE_ENTITY, entry.data[CONF_TEMPERATURE_ENTITY]
-        )
+        self._temperature_entity_id: str = entry.data[CONF_TEMPERATURE_ENTITY]
         self._output_entity_id: str = entry.data[CONF_OUTPUT_ENTITY]
         self._humidity_sensor_entity_id: str | None = entry.data.get(CONF_HUMIDITY_ENTITY)
 
-        self._knx_mode_temperatures = _normalize_knx_mode_temperatures(
-            entry.options.get(
-                CONF_HVAC_MODES,
-                entry.data.get(CONF_HVAC_MODES, HVAC_MODE_DEFAULT_TEMPERATURES),
-            )
-        )
+        self._knx_mode_temperatures = _resolve_hvac_mode_temperatures(entry)
 
         self._attr_min_temp = _coerce_float(
             entry.options.get(CONF_MIN_TEMPERATURE, entry.data.get(CONF_MIN_TEMPERATURE)),
@@ -186,10 +203,10 @@ class PIDClimate(ClimateEntity):
 
     def _default_target_temperature(self, hvac_mode: HVACMode) -> float:
         if hvac_mode == HVACMode.AUTO:
-            return self._knx_mode_temperatures.get(0, 22.0)
+            return self._knx_mode_temperatures.get(0, HVAC_MODE_DEFAULT_TEMPERATURES[0])
         if hvac_mode == HVACMode.HEAT:
-            return self._knx_mode_temperatures.get(1, 22.0)
-        return self._knx_mode_temperatures.get(1, 22.0)
+            return self._knx_mode_temperatures.get(1, HVAC_MODE_DEFAULT_TEMPERATURES[1])
+        return self._knx_mode_temperatures.get(1, HVAC_MODE_DEFAULT_TEMPERATURES[1])
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -236,7 +253,11 @@ class PIDClimate(ClimateEntity):
         if self._is_removing:
             return
 
+        old_state: State | None = event.data.get("old_state")
         new_state: State | None = event.data["new_state"]
+        if old_state is not None and new_state is not None and old_state.state == new_state.state:
+            return
+
         temperature = _parse_temperature_state(new_state)
         if temperature is None:
             if new_state is not None:
@@ -328,9 +349,7 @@ class PIDClimate(ClimateEntity):
         if self._is_removing:
             return
 
-        temperature_entity_id = entry.options.get(
-            CONF_TEMPERATURE_ENTITY, entry.data.get(CONF_TEMPERATURE_ENTITY)
-        )
+        temperature_entity_id = entry.data.get(CONF_TEMPERATURE_ENTITY)
 
         if isinstance(temperature_entity_id, str) and temperature_entity_id:
             if temperature_entity_id != self._temperature_entity_id:
@@ -346,12 +365,7 @@ class PIDClimate(ClimateEntity):
                 )
                 self._async_subscribe_temperature_listener()
 
-        self._knx_mode_temperatures = _normalize_knx_mode_temperatures(
-            entry.options.get(
-                CONF_HVAC_MODES,
-                entry.data.get(CONF_HVAC_MODES, HVAC_MODE_DEFAULT_TEMPERATURES),
-            )
-        )
+        self._knx_mode_temperatures = _resolve_hvac_mode_temperatures(entry)
         self._attr_min_temp = _coerce_float(
             entry.options.get(CONF_MIN_TEMPERATURE, entry.data.get(CONF_MIN_TEMPERATURE)),
             DEFAULT_MIN_TEMPERATURE,
