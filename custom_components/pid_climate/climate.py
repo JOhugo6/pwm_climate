@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
@@ -92,7 +92,7 @@ class PIDClimate(ClimateEntity):
         self._attr_unique_id = entry.entry_id
         self._attr_name = entry.data.get(CONF_NAME, entry.title)
 
-        self._temperature_sensor_entity_id: str = entry.data[CONF_TEMPERATURE_ENTITY]
+        self._temperature_entity_id: str = entry.data[CONF_TEMPERATURE_ENTITY]
         self._output_entity_id: str = entry.data[CONF_OUTPUT_ENTITY]
         self._humidity_sensor_entity_id: str | None = entry.data.get(CONF_HUMIDITY_ENTITY)
 
@@ -128,13 +128,13 @@ class PIDClimate(ClimateEntity):
         self._attr_current_temperature: float | None = None
         self._attr_target_temperature: float = self._default_target_temperature(self._attr_hvac_mode)
 
-        self._unsub_temp = None
+        self._unsub_temperature_listener: Callable[[], None] | None = None
         self._last_output_value: float | None = None
 
         _LOGGER.debug(
             "PIDClimate init name=%s temp_sensor=%s output=%s pwm_period_min=%s",
             self._attr_name,
-            self._temperature_sensor_entity_id,
+            self._temperature_entity_id,
             self._output_entity_id,
             self._pwm_period_minutes,
         )
@@ -163,7 +163,7 @@ class PIDClimate(ClimateEntity):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return {
-            "temperature_entity": self._temperature_sensor_entity_id,
+            "temperature_entity": self._temperature_entity_id,
             "output_entity": self._output_entity_id,
             "humidity_entity": self._humidity_sensor_entity_id,
             "pwm_period_minutes": self._pwm_period_minutes,
@@ -201,8 +201,8 @@ class PIDClimate(ClimateEntity):
         self.async_write_ha_state()
 
     @callback
-    def _handle_temperature_change(self, event: Event) -> None:
-        new_state = event.data.get("new_state")
+    def _async_temperature_changed(self, event: Event) -> None:
+        new_state: State | None = event.data["new_state"]
         if new_state is None or new_state.state in (None, "unknown", "unavailable"):
             return
 
@@ -212,8 +212,6 @@ class PIDClimate(ClimateEntity):
             _LOGGER.debug("Ignoring non-numeric temperature state: %s", new_state.state)
             return
 
-        _LOGGER.info("PID Climate temperature updated to %.1f °C", self._attr_current_temperature)
-        self.hass.async_create_task(self._async_update_output_hook())
         self.async_write_ha_state()
 
     async def async_turn_off(self) -> None:
@@ -231,21 +229,21 @@ class PIDClimate(ClimateEntity):
 
     async def async_added_to_hass(self) -> None:
         self._async_sync_current_temperature_from_state(
-            self.hass.states.get(self._temperature_sensor_entity_id)
+            self.hass.states.get(self._temperature_entity_id)
         )
 
-        self._unsub_temp = async_track_state_change_event(
+        self._unsub_temperature_listener = async_track_state_change_event(
             self.hass,
-            [self._temperature_sensor_entity_id],
-            self._handle_temperature_change,
+            [self._temperature_entity_id],
+            self._async_temperature_changed,
         )
 
         self.async_write_ha_state()
 
     async def async_will_remove_from_hass(self) -> None:
-        if self._unsub_temp is not None:
-            self._unsub_temp()
-            self._unsub_temp = None
+        if self._unsub_temperature_listener is not None:
+            self._unsub_temperature_listener()
+            self._unsub_temperature_listener = None
 
     def _async_sync_current_temperature_from_state(self, state: State | None) -> None:
         if state is None or state.state in (None, "unknown", "unavailable"):
