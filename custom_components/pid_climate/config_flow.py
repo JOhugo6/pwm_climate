@@ -5,8 +5,10 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import CONF_NAME
 from homeassistant.core import callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
 from .const import (
@@ -51,11 +53,18 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ):
         """Initial configuration step."""
 
+        errors: dict[str, str] = {}
+        temperature_entities = self._async_get_temperature_entities()
+
         if user_input is not None:
-            return self.async_create_entry(
-                title=user_input[CONF_NAME],
-                data=user_input,
-            )
+            if user_input[CONF_TEMPERATURE_ENTITY] not in temperature_entities:
+                errors[CONF_TEMPERATURE_ENTITY] = "invalid_temperature_entity"
+
+            if not errors:
+                return self.async_create_entry(
+                    title=user_input[CONF_NAME],
+                    data=user_input,
+                )
 
         # ─────────────────────────────────────────────
         # HVAC mode temperature fields
@@ -77,7 +86,8 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_TEMPERATURE_ENTITY):
                     selector.EntitySelector(
                         selector.EntitySelectorConfig(
-                            domain=["sensor", "number"],
+                            domain="sensor",
+                            include_entities=temperature_entities,
                         )
                     ),
 
@@ -149,4 +159,36 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=schema,
+            errors=errors,
         )
+
+    def _async_get_temperature_entities(self) -> list[str]:
+        registry = er.async_get(self.hass)
+        registry_entries = {
+            entry.entity_id: entry
+            for entry in registry.entities.values()
+            if entry.domain == "sensor"
+        }
+
+        entities: set[str] = set(registry_entries)
+        entities.update(state.entity_id for state in self.hass.states.async_all("sensor"))
+
+        valid_entities: list[str] = []
+        for entity_id in sorted(entities):
+            entry = registry_entries.get(entity_id)
+            state = self.hass.states.get(entity_id)
+            if self._is_temperature_sensor(entry, state):
+                valid_entities.append(entity_id)
+
+        return valid_entities
+
+    @staticmethod
+    def _is_temperature_sensor(entry: Any | None, state: Any | None) -> bool:
+        device_class = entry.device_class if entry and entry.device_class else None
+        unit = None
+
+        if state:
+            device_class = state.attributes.get("device_class", device_class)
+            unit = state.attributes.get("unit_of_measurement")
+
+        return device_class == SensorDeviceClass.TEMPERATURE or unit == "°C"
