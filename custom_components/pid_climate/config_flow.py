@@ -6,6 +6,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.const import CONF_NAME
+from homeassistant.core import callback
 from homeassistant.helpers import selector
 
 from .const import (
@@ -31,12 +32,18 @@ from .const import (
     HVAC_MODE_LABELS,
     HVAC_MODE_DEFAULT_TEMPERATURES,
 )
+from .options_flow import PIDClimateOptionsFlowHandler
 
 
 class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Config flow for PID Climate."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> PIDClimateOptionsFlowHandler:
+        return PIDClimateOptionsFlowHandler(config_entry)
 
     async def async_step_user(
         self,
