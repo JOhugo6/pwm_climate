@@ -117,6 +117,7 @@ class PIDClimate(ClimateEntity):
 
         self._attr_hvac_modes = self._compute_hvac_modes()
         self._attr_hvac_mode = HVACMode.HEAT if HVACMode.HEAT in self._attr_hvac_modes else HVACMode.AUTO
+        self._last_hvac_mode = self._attr_hvac_mode
         self._knx_hvac_mode: int | None = 1 if self._attr_hvac_mode == HVACMode.HEAT else 0
 
         self._attr_current_temperature: float | None = None
@@ -176,6 +177,7 @@ class PIDClimate(ClimateEntity):
         self._attr_hvac_mode = hvac_mode
 
         if hvac_mode != HVACMode.OFF:
+            self._last_hvac_mode = hvac_mode
             self._attr_target_temperature = self._default_target_temperature(hvac_mode)
             self._knx_hvac_mode = 0 if hvac_mode == HVACMode.AUTO else 1
         else:
@@ -206,6 +208,19 @@ class PIDClimate(ClimateEntity):
         self.hass.async_create_task(self._async_update_output_hook())
         self.async_write_ha_state()
 
+    async def async_turn_off(self) -> None:
+        await self.async_set_hvac_mode(HVACMode.OFF)
+
+    async def async_turn_on(self) -> None:
+        if self._attr_hvac_mode != HVACMode.OFF:
+            return
+
+        target_mode = self._last_hvac_mode
+        if target_mode == HVACMode.OFF or target_mode not in self._attr_hvac_modes:
+            target_mode = HVACMode.HEAT if HVACMode.HEAT in self._attr_hvac_modes else HVACMode.AUTO
+
+        await self.async_set_hvac_mode(target_mode)
+
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
 
@@ -232,6 +247,10 @@ class PIDClimate(ClimateEntity):
             _LOGGER.debug("Ignoring non-numeric temperature state: %s", state.state)
 
     async def _async_update_output_hook(self) -> None:
+        if self._attr_hvac_mode == HVACMode.OFF:
+            await self._async_set_output_to_min()
+            return
+
         _LOGGER.debug(
             "Output hook: hvac_mode=%s current=%s target=%s output_entity=%s pwm_period_min=%s",
             self._attr_hvac_mode,
@@ -240,3 +259,25 @@ class PIDClimate(ClimateEntity):
             self._output_entity_id,
             self._pwm_period_minutes,
         )
+
+    async def _async_set_output_to_min(self) -> None:
+        output_state = self.hass.states.get(self._output_entity_id)
+        output_min = _coerce_float(output_state.attributes.get("min") if output_state else None, 0.0)
+        await self._async_set_output_value(output_min)
+
+    async def _async_set_output_value(self, value: float) -> None:
+        if self._last_output_value == value:
+            return
+
+        try:
+            await self.hass.services.async_call(
+                "number",
+                "set_value",
+                {"entity_id": self._output_entity_id, "value": value},
+                blocking=True,
+            )
+        except Exception:
+            _LOGGER.exception("Failed setting %s to %s", self._output_entity_id, value)
+            return
+
+        self._last_output_value = value
