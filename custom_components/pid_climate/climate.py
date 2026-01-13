@@ -244,6 +244,12 @@ class PIDClimate(ClimateEntity):
             return
 
         self._attr_current_temperature = temperature
+        _LOGGER.debug(
+            "Temperature update for %s from %s: %s",
+            self.entity_id,
+            self._temperature_entity_id,
+            temperature,
+        )
         self.async_write_ha_state()
 
     async def async_turn_off(self) -> None:
@@ -291,6 +297,7 @@ class PIDClimate(ClimateEntity):
 
         self._unsub_temperature_listener()
         self._unsub_temperature_listener = None
+        _LOGGER.debug("Unregistered temperature listener for %s", self.entity_id)
 
     @callback
     def _async_subscribe_temperature_listener(self) -> None:
@@ -299,10 +306,22 @@ class PIDClimate(ClimateEntity):
 
         self._async_unsubscribe_temperature_listener()
 
+        if not self._temperature_entity_id:
+            _LOGGER.debug(
+                "No temperature entity configured for %s; listener not registered",
+                self.entity_id,
+            )
+            return
+
         self._unsub_temperature_listener = async_track_state_change_event(
             self.hass,
             [self._temperature_entity_id],
             self._async_temperature_changed,
+        )
+        _LOGGER.debug(
+            "Registered temperature listener for %s (%s)",
+            self.entity_id,
+            self._temperature_entity_id,
         )
 
     async def _async_config_entry_updated(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
