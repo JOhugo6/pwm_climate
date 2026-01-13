@@ -1,14 +1,16 @@
 ﻿from __future__ import annotations
 
+from typing import Any
+
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.core import callback
+from homeassistant.helpers import selector
 
 from .const import (
     DOMAIN,
 
-    # obecné PID / klima parametry
+    # PID / Climate params
     CONF_MIN_TEMPERATURE,
     CONF_MAX_TEMPERATURE,
     CONF_TEMPERATURE_STEP,
@@ -20,9 +22,9 @@ from .const import (
     DEFAULT_PWM_PERIOD,
 
     # HVAC
-    CONF_HVAC_MODE_TEMPERATURES,
-    HVAC_MODES,
-    DEFAULT_HVAC_MODE_TEMPERATURES,
+    CONF_HVAC_MODES,
+    HVAC_MODE_LABELS,
+    HVAC_MODE_DEFAULT_TEMPERATURES,
 )
 
 
@@ -32,81 +34,109 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
     def __init__(self, entry: config_entries.ConfigEntry) -> None:
         self.entry = entry
 
-    async def async_step_init(self, user_input: dict | None = None):
-        """Main options step."""
+    async def async_step_init(
+        self,
+        user_input: dict[str, Any] | None = None,
+    ):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
 
-        options = self.entry.options
-        data = self.entry.data
+        # ─────────────────────────────────────────────
+        # HVAC mode temperature sliders
+        # ─────────────────────────────────────────────
+        hvac_mode_schema: dict[Any, Any] = {}
 
-        # --- obecné hodnoty ---
-        min_temp = options.get(
-            CONF_MIN_TEMPERATURE,
-            data.get(CONF_MIN_TEMPERATURE, DEFAULT_MIN_TEMPERATURE),
-        )
-        max_temp = options.get(
-            CONF_MAX_TEMPERATURE,
-            data.get(CONF_MAX_TEMPERATURE, DEFAULT_MAX_TEMPERATURE),
-        )
-        temp_step = options.get(
-            CONF_TEMPERATURE_STEP,
-            data.get(CONF_TEMPERATURE_STEP, DEFAULT_TEMPERATURE_STEP),
-        )
-        pwm_period = options.get(
-            CONF_PWM_PERIOD,
-            data.get(CONF_PWM_PERIOD, DEFAULT_PWM_PERIOD),
+        current_hvac_modes = self.entry.options.get(
+            CONF_HVAC_MODES,
+            HVAC_MODE_DEFAULT_TEMPERATURES,
         )
 
-        # --- HVAC teploty ---
-        hvac_mode_temps = options.get(
-            CONF_HVAC_MODE_TEMPERATURES,
-            data.get(CONF_HVAC_MODE_TEMPERATURES, DEFAULT_HVAC_MODE_TEMPERATURES),
-        )
-
-        schema: dict = {
-            vol.Optional(
-                CONF_MIN_TEMPERATURE,
-                default=min_temp,
-            ): vol.Coerce(float),
-
-            vol.Optional(
-                CONF_MAX_TEMPERATURE,
-                default=max_temp,
-            ): vol.Coerce(float),
-
-            vol.Optional(
-                CONF_TEMPERATURE_STEP,
-                default=temp_step,
-            ): vol.Coerce(float),
-
-            vol.Optional(
-                CONF_PWM_PERIOD,
-                default=pwm_period,
-            ): vol.Coerce(int),
-        }
-
-        # --- HVAC módy (DPT 20.102 kompatibilní) ---
-        for mode in HVAC_MODES:
-            schema[
+        for mode_id, label in HVAC_MODE_LABELS.items():
+            hvac_mode_schema[
                 vol.Optional(
-                    f"{CONF_HVAC_MODE_TEMPERATURES}.{mode}",
-                    default=hvac_mode_temps.get(
-                        mode,
-                        DEFAULT_HVAC_MODE_TEMPERATURES[mode],
+                    str(mode_id),
+                    default=current_hvac_modes.get(
+                        mode_id,
+                        HVAC_MODE_DEFAULT_TEMPERATURES[mode_id],
                     ),
                 )
-            ] = vol.Coerce(float)
+            ] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=5,
+                    max=40,
+                    step=0.5,
+                    unit_of_measurement="°C",
+                    mode=selector.NumberSelectorMode.SLIDER,
+                )
+            )
+
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_MIN_TEMPERATURE,
+                    default=self.entry.options.get(
+                        CONF_MIN_TEMPERATURE,
+                        DEFAULT_MIN_TEMPERATURE,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5,
+                        max=40,
+                        step=0.5,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.SLIDER,
+                    )
+                ),
+
+                vol.Optional(
+                    CONF_MAX_TEMPERATURE,
+                    default=self.entry.options.get(
+                        CONF_MAX_TEMPERATURE,
+                        DEFAULT_MAX_TEMPERATURE,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=5,
+                        max=40,
+                        step=0.5,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.SLIDER,
+                    )
+                ),
+
+                vol.Optional(
+                    CONF_TEMPERATURE_STEP,
+                    default=self.entry.options.get(
+                        CONF_TEMPERATURE_STEP,
+                        DEFAULT_TEMPERATURE_STEP,
+                    ),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.1,
+                        max=2.0,
+                        step=0.1,
+                        unit_of_measurement="°C",
+                        mode=selector.NumberSelectorMode.SLIDER,
+                    )
+                ),
+
+                vol.Optional(
+                    CONF_PWM_PERIOD,
+                    default=self.entry.options.get(
+                        CONF_PWM_PERIOD,
+                        DEFAULT_PWM_PERIOD,
+                    ),
+                ): vol.Coerce(int),
+
+                # HVAC modes → target temperatures
+                vol.Optional(
+                    CONF_HVAC_MODES,
+                    default=current_hvac_modes,
+                ): vol.Schema(hvac_mode_schema),
+            }
+        )
 
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(schema),
+            data_schema=schema,
         )
-
-
-@callback
-def async_get_options_flow(
-    entry: config_entries.ConfigEntry,
-) -> PIDClimateOptionsFlowHandler:
-    """Return the options flow handler."""
-    return PIDClimateOptionsFlowHandler(entry)
