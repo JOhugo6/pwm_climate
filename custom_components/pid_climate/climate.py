@@ -9,7 +9,12 @@ from typing import Any
 from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
 from homeassistant.components.climate.const import HVACMode
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import ATTR_TEMPERATURE, UnitOfTemperature
+from homeassistant.const import (
+    ATTR_TEMPERATURE,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+    UnitOfTemperature,
+)
 from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
@@ -67,6 +72,28 @@ def _normalize_knx_mode_temperatures(raw: Mapping[Any, Any]) -> dict[int, float]
     return normalized
 
 
+def _parse_temperature_state(state: State | None) -> float | None:
+    if state is None:
+        return None
+
+    raw = state.state
+    if raw is None:
+        return None
+
+    value = str(raw).strip()
+    if not value:
+        return None
+
+    lowered = value.lower()
+    if lowered in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+        return None
+
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
 class PIDClimate(ClimateEntity):
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_should_poll = False
@@ -92,7 +119,9 @@ class PIDClimate(ClimateEntity):
         self._attr_unique_id = entry.entry_id
         self._attr_name = entry.data.get(CONF_NAME, entry.title)
 
-        self._temperature_entity_id: str = entry.data[CONF_TEMPERATURE_ENTITY]
+        self._temperature_entity_id: str = entry.options.get(
+            CONF_TEMPERATURE_ENTITY, entry.data[CONF_TEMPERATURE_ENTITY]
+        )
         self._output_entity_id: str = entry.data[CONF_OUTPUT_ENTITY]
         self._humidity_sensor_entity_id: str | None = entry.data.get(CONF_HUMIDITY_ENTITY)
 
@@ -129,7 +158,9 @@ class PIDClimate(ClimateEntity):
         self._attr_target_temperature: float = self._default_target_temperature(self._attr_hvac_mode)
 
         self._unsub_temperature_listener: Callable[[], None] | None = None
+        self._unsub_entry_update_listener: Callable[[], None] | None = None
         self._last_output_value: float | None = None
+        self._is_removing = False
 
         _LOGGER.debug(
             "PIDClimate init name=%s temp_sensor=%s output=%s pwm_period_min=%s",
@@ -202,16 +233,17 @@ class PIDClimate(ClimateEntity):
 
     @callback
     def _async_temperature_changed(self, event: Event) -> None:
+        if self._is_removing:
+            return
+
         new_state: State | None = event.data["new_state"]
-        if new_state is None or new_state.state in (None, "unknown", "unavailable"):
+        temperature = _parse_temperature_state(new_state)
+        if temperature is None:
+            if new_state is not None:
+                _LOGGER.debug("Ignoring invalid temperature state: %s", new_state.state)
             return
 
-        try:
-            self._attr_current_temperature = float(new_state.state)
-        except ValueError:
-            _LOGGER.debug("Ignoring non-numeric temperature state: %s", new_state.state)
-            return
-
+        self._attr_current_temperature = temperature
         self.async_write_ha_state()
 
     async def async_turn_off(self) -> None:
@@ -228,9 +260,44 @@ class PIDClimate(ClimateEntity):
         await self.async_set_hvac_mode(target_mode)
 
     async def async_added_to_hass(self) -> None:
-        self._async_sync_current_temperature_from_state(
-            self.hass.states.get(self._temperature_entity_id)
+        self._async_sync_current_temperature_from_state(self.hass.states.get(self._temperature_entity_id))
+        self._async_subscribe_temperature_listener()
+
+        self._unsub_entry_update_listener = self._entry.add_update_listener(
+            self._async_config_entry_updated
         )
+
+        self.async_write_ha_state()
+
+    async def async_will_remove_from_hass(self) -> None:
+        self._is_removing = True
+        self._async_unsubscribe_temperature_listener()
+
+        if self._unsub_entry_update_listener is not None:
+            self._unsub_entry_update_listener()
+            self._unsub_entry_update_listener = None
+
+    def _async_sync_current_temperature_from_state(self, state: State | None) -> None:
+        temperature = _parse_temperature_state(state)
+        if temperature is None:
+            return
+
+        self._attr_current_temperature = temperature
+
+    @callback
+    def _async_unsubscribe_temperature_listener(self) -> None:
+        if self._unsub_temperature_listener is None:
+            return
+
+        self._unsub_temperature_listener()
+        self._unsub_temperature_listener = None
+
+    @callback
+    def _async_subscribe_temperature_listener(self) -> None:
+        if self._is_removing:
+            return
+
+        self._async_unsubscribe_temperature_listener()
 
         self._unsub_temperature_listener = async_track_state_change_event(
             self.hass,
@@ -238,20 +305,55 @@ class PIDClimate(ClimateEntity):
             self._async_temperature_changed,
         )
 
-        self.async_write_ha_state()
-
-    async def async_will_remove_from_hass(self) -> None:
-        if self._unsub_temperature_listener is not None:
-            self._unsub_temperature_listener()
-            self._unsub_temperature_listener = None
-
-    def _async_sync_current_temperature_from_state(self, state: State | None) -> None:
-        if state is None or state.state in (None, "unknown", "unavailable"):
+    async def _async_config_entry_updated(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        if self._is_removing:
             return
-        try:
-            self._attr_current_temperature = float(state.state)
-        except ValueError:
-            _LOGGER.debug("Ignoring non-numeric temperature state: %s", state.state)
+
+        temperature_entity_id = entry.options.get(
+            CONF_TEMPERATURE_ENTITY, entry.data.get(CONF_TEMPERATURE_ENTITY)
+        )
+
+        if isinstance(temperature_entity_id, str) and temperature_entity_id:
+            if temperature_entity_id != self._temperature_entity_id:
+                _LOGGER.debug(
+                    "Updating temperature sensor for %s: %s -> %s",
+                    self.entity_id,
+                    self._temperature_entity_id,
+                    temperature_entity_id,
+                )
+                self._temperature_entity_id = temperature_entity_id
+                self._async_sync_current_temperature_from_state(
+                    hass.states.get(self._temperature_entity_id)
+                )
+                self._async_subscribe_temperature_listener()
+
+        self._knx_mode_temperatures = _normalize_knx_mode_temperatures(
+            entry.options.get(
+                CONF_HVAC_MODES,
+                entry.data.get(CONF_HVAC_MODES, HVAC_MODE_DEFAULT_TEMPERATURES),
+            )
+        )
+        self._attr_min_temp = _coerce_float(
+            entry.options.get(CONF_MIN_TEMPERATURE, entry.data.get(CONF_MIN_TEMPERATURE)),
+            DEFAULT_MIN_TEMPERATURE,
+        )
+        self._attr_max_temp = _coerce_float(
+            entry.options.get(CONF_MAX_TEMPERATURE, entry.data.get(CONF_MAX_TEMPERATURE)),
+            DEFAULT_MAX_TEMPERATURE,
+        )
+        self._attr_target_temperature_step = _coerce_float(
+            entry.options.get(CONF_TEMPERATURE_STEP, entry.data.get(CONF_TEMPERATURE_STEP)),
+            DEFAULT_TEMPERATURE_STEP,
+        )
+        self._pwm_period_minutes = _coerce_int(
+            entry.options.get(CONF_PWM_PERIOD, entry.data.get(CONF_PWM_PERIOD)),
+            DEFAULT_PWM_PERIOD,
+        )
+        self._attr_hvac_modes = self._compute_hvac_modes()
+        if self._attr_hvac_mode not in self._attr_hvac_modes:
+            self._attr_hvac_mode = HVACMode.OFF if HVACMode.OFF in self._attr_hvac_modes else self._attr_hvac_modes[0]
+
+        self.async_write_ha_state()
 
     async def _async_update_output_hook(self) -> None:
         if self._attr_hvac_mode == HVACMode.OFF:
