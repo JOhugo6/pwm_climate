@@ -18,6 +18,7 @@ from .const import (
     CONF_OUTPUT_ENTITY,
     CONF_HUMIDITY_ENTITY,
 
+    CONF_DEFAULT_PRESET,
     CONF_MIN_TEMPERATURE,
     CONF_MAX_TEMPERATURE,
     CONF_TEMPERATURE_STEP,
@@ -29,9 +30,11 @@ from .const import (
     DEFAULT_PWM_PERIOD,
 
 
-    HVAC_MODE_LABELS,
-    HVAC_MODE_DEFAULT_TEMPERATURES,
-    HVAC_MODE_TEMPERATURE_KEYS,
+    DEFAULT_PRESET,
+    PRESET_LABELS,
+    PRESET_DEFAULT_TEMPERATURES,
+    PRESET_TEMPERATURE_KEYS,
+    PRESET_NAMES,
 )
 from .options_flow import PIDClimateOptionsFlowHandler
 
@@ -68,14 +71,14 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # ─────────────────────────────────────────────
         # HVAC mode temperature fields
         # ─────────────────────────────────────────────
-        hvac_mode_fields: dict[Any, Any] = {}
+        preset_fields: dict[Any, Any] = {}
 
-        for mode_id in HVAC_MODE_LABELS:
-            key = HVAC_MODE_TEMPERATURE_KEYS[mode_id]
-            hvac_mode_fields[
+        for preset_id in PRESET_LABELS:
+            key = PRESET_TEMPERATURE_KEYS[preset_id]
+            preset_fields[
                 vol.Required(
                     key,
-                    default=HVAC_MODE_DEFAULT_TEMPERATURES[mode_id],
+                    default=PRESET_DEFAULT_TEMPERATURES[preset_id],
                 )
             ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
@@ -111,6 +114,16 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                             domain="sensor",
                         )
                     ),
+
+                vol.Required(
+                    CONF_DEFAULT_PRESET,
+                    default=DEFAULT_PRESET,
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=PRESET_NAMES,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
 
                 vol.Optional(
                     CONF_MIN_TEMPERATURE,
@@ -161,7 +174,7 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # ─────────────────────────────────────
             }
 
-        schema_data.update(hvac_mode_fields)
+        schema_data.update(preset_fields)
         schema = vol.Schema(schema_data)
 
         return self.async_show_form(

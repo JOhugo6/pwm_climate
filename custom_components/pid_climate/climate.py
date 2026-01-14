@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from homeassistant.components.climate import ClimateEntity, ClimateEntityFeature
-from homeassistant.components.climate.const import HVACMode
+from homeassistant.components.climate.const import ATTR_PRESET_MODE, HVACMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_TEMPERATURE,
@@ -20,8 +20,10 @@ from homeassistant.const import (
 from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import (
+    CONF_DEFAULT_PRESET,
     CONF_HUMIDITY_ENTITY,
     CONF_HVAC_MODES,
     CONF_MAX_TEMPERATURE,
@@ -31,13 +33,17 @@ from .const import (
     CONF_PWM_PERIOD,
     CONF_TEMPERATURE_ENTITY,
     CONF_TEMPERATURE_STEP,
+    DEFAULT_PRESET,
     DEFAULT_MAX_TEMPERATURE,
     DEFAULT_MIN_TEMPERATURE,
     DEFAULT_PWM_PERIOD,
     DEFAULT_TEMPERATURE_STEP,
     DOMAIN,
-    HVAC_MODE_DEFAULT_TEMPERATURES,
-    HVAC_MODE_TEMPERATURE_KEYS,
+    PRESET_DEFAULT_TEMPERATURES,
+    PRESET_LABELS,
+    PRESET_MANUAL,
+    PRESET_NAMES,
+    PRESET_TEMPERATURE_KEYS,
 )
 
 _LOGGER = logging.getLogger(DOMAIN)
@@ -68,55 +74,75 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
-def _merge_hvac_mode_temperatures(
-    base: dict[int, float],
+def _merge_preset_temperatures(
+    base: dict[str, float],
     raw: Mapping[Any, Any] | None,
-) -> dict[int, float]:
+) -> dict[str, float]:
     if not raw:
         return base
 
     for key, value in raw.items():
-        try:
-            mode = int(key)
-        except (TypeError, ValueError):
+        preset_name: str | None = None
+        if isinstance(key, str) and key in base:
+            preset_name = key
+        else:
+            try:
+                preset_id = int(key)
+            except (TypeError, ValueError):
+                continue
+            preset_name = PRESET_LABELS.get(preset_id)
+
+        if not preset_name or preset_name not in base:
             continue
 
-        if mode not in base:
-            continue
-
         try:
-            base[mode] = float(value)
+            base[preset_name] = float(value)
         except (TypeError, ValueError):
             continue
 
     return base
 
 
-def _apply_flat_hvac_mode_temperatures(
-    base: dict[int, float],
+def _apply_flat_preset_temperatures(
+    base: dict[str, float],
     source: Mapping[str, Any] | None,
-) -> dict[int, float]:
+) -> dict[str, float]:
     if not source:
         return base
 
-    for mode_id, key in HVAC_MODE_TEMPERATURE_KEYS.items():
+    for preset_id, key in PRESET_TEMPERATURE_KEYS.items():
         if key not in source:
             continue
+        preset_name = PRESET_LABELS.get(preset_id)
+        if not preset_name:
+            continue
         try:
-            base[mode_id] = float(source[key])
+            base[preset_name] = float(source[key])
         except (TypeError, ValueError):
             continue
 
     return base
 
 
-def _resolve_hvac_mode_temperatures(entry: ConfigEntry) -> dict[int, float]:
-    temperatures = dict(HVAC_MODE_DEFAULT_TEMPERATURES)
-    temperatures = _apply_flat_hvac_mode_temperatures(temperatures, entry.data)
-    temperatures = _merge_hvac_mode_temperatures(temperatures, entry.data.get(CONF_HVAC_MODES))
-    temperatures = _apply_flat_hvac_mode_temperatures(temperatures, entry.options)
-    temperatures = _merge_hvac_mode_temperatures(temperatures, entry.options.get(CONF_HVAC_MODES))
+def _resolve_preset_temperatures(entry: ConfigEntry) -> dict[str, float]:
+    temperatures = {
+        PRESET_LABELS[preset_id]: PRESET_DEFAULT_TEMPERATURES[preset_id]
+        for preset_id in PRESET_LABELS
+    }
+    temperatures = _apply_flat_preset_temperatures(temperatures, entry.data)
+    temperatures = _merge_preset_temperatures(temperatures, entry.data.get(CONF_HVAC_MODES))
+    temperatures = _apply_flat_preset_temperatures(temperatures, entry.options)
+    temperatures = _merge_preset_temperatures(temperatures, entry.options.get(CONF_HVAC_MODES))
     return temperatures
+
+
+def _resolve_default_preset(entry: ConfigEntry, presets: Mapping[str, float]) -> str:
+    candidate = entry.options.get(CONF_DEFAULT_PRESET, entry.data.get(CONF_DEFAULT_PRESET))
+    if isinstance(candidate, str) and candidate in presets:
+        return candidate
+    if DEFAULT_PRESET in presets:
+        return DEFAULT_PRESET
+    return next(iter(presets), DEFAULT_PRESET)
 
 
 def _extract_temperature_value(state: State | None) -> tuple[float | None, str | None]:
@@ -176,23 +202,15 @@ def _extract_humidity_value(state: State | None) -> tuple[float | None, str | No
     return humidity, None
 
 
-class PIDClimate(ClimateEntity):
+class PIDClimate(ClimateEntity, RestoreEntity):
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_should_poll = False
     _attr_supported_features = (
         ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.TURN_ON
         | ClimateEntityFeature.TURN_OFF
+        | ClimateEntityFeature.PRESET_MODE
     )
-
-    # KNX DPT 20.102 -> HA HVACMode (HA has fewer modes than KNX).
-    _knx_to_ha_hvac_mode: dict[int, HVACMode] = {
-        0: HVACMode.AUTO,  # Auto
-        1: HVACMode.HEAT,  # Comfort
-        2: HVACMode.HEAT,  # Standby
-        3: HVACMode.HEAT,  # Economy
-        4: HVACMode.HEAT,  # Building protection
-    }
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._hass = hass
@@ -205,7 +223,10 @@ class PIDClimate(ClimateEntity):
         self._output_entity_id: str = entry.data[CONF_OUTPUT_ENTITY]
         self._humidity_sensor_entity_id: str | None = entry.data.get(CONF_HUMIDITY_ENTITY)
 
-        self._knx_mode_temperatures = _resolve_hvac_mode_temperatures(entry)
+        self._preset_temperatures = _resolve_preset_temperatures(entry)
+        self._default_preset = _resolve_default_preset(entry, self._preset_temperatures)
+        self._active_preset = self._default_preset
+        self._manual_override = False
 
         self._attr_min_temp = _coerce_float(
             entry.options.get(CONF_MIN_TEMPERATURE, entry.data.get(CONF_MIN_TEMPERATURE)),
@@ -225,12 +246,12 @@ class PIDClimate(ClimateEntity):
         )
 
         self._attr_hvac_modes = self._compute_hvac_modes()
-        self._attr_hvac_mode = HVACMode.HEAT if HVACMode.HEAT in self._attr_hvac_modes else HVACMode.AUTO
-        self._last_hvac_mode = self._attr_hvac_mode
-        self._knx_hvac_mode: int | None = 1 if self._attr_hvac_mode == HVACMode.HEAT else 0
+        self._attr_hvac_mode = HVACMode.OFF
+        self._attr_preset_modes = list(PRESET_NAMES)
+        self._attr_preset_mode = self._active_preset
 
         self._attr_current_temperature: float | None = None
-        self._attr_target_temperature: float = self._default_target_temperature(self._attr_hvac_mode)
+        self._attr_target_temperature: float = self._get_preset_temperature(self._active_preset)
         self._attr_current_humidity: float | None = None
 
         self._unsub_temperature_listener: Callable[[], None] | None = None
@@ -255,25 +276,13 @@ class PIDClimate(ClimateEntity):
         )
 
     def _compute_hvac_modes(self) -> list[HVACMode]:
-        modes: list[HVACMode] = [HVACMode.OFF]
+        return [HVACMode.OFF, HVACMode.HEAT]
 
-        if 0 in self._knx_mode_temperatures:
-            modes.append(HVACMode.AUTO)
-
-        if any(mode in self._knx_mode_temperatures for mode in (1, 2, 3, 4)):
-            modes.append(HVACMode.HEAT)
-
-        if HVACMode.HEAT not in modes:
-            modes.append(HVACMode.HEAT)
-
-        return modes
-
-    def _default_target_temperature(self, hvac_mode: HVACMode) -> float:
-        if hvac_mode == HVACMode.AUTO:
-            return self._knx_mode_temperatures.get(0, HVAC_MODE_DEFAULT_TEMPERATURES[0])
-        if hvac_mode == HVACMode.HEAT:
-            return self._knx_mode_temperatures.get(1, HVAC_MODE_DEFAULT_TEMPERATURES[1])
-        return self._knx_mode_temperatures.get(1, HVAC_MODE_DEFAULT_TEMPERATURES[1])
+    def _get_preset_temperature(self, preset: str) -> float:
+        temperature = self._preset_temperatures.get(preset)
+        if temperature is not None:
+            return temperature
+        return PRESET_DEFAULT_TEMPERATURES[0]
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -282,35 +291,147 @@ class PIDClimate(ClimateEntity):
             "output_entity": self._output_entity_id,
             "humidity_entity": self._humidity_sensor_entity_id,
             "pwm_period_minutes": self._pwm_period_minutes,
-            "knx_hvac_mode": self._knx_hvac_mode,
+            "default_preset": self._default_preset,
+            "active_preset": self._active_preset,
+            "manual_override": self._manual_override,
         }
+
+    def _set_target_temperature(self, temperature: float, *, reason: str) -> None:
+        self._attr_target_temperature = float(temperature)
+        _LOGGER.debug(
+            "Setpoint change for %s -> %.2f (reason=%s)",
+            self.entity_id,
+            self._attr_target_temperature,
+            reason,
+        )
+
+    async def _async_apply_preset(
+        self,
+        preset: str,
+        *,
+        reason: str,
+        log_info: bool = True,
+    ) -> None:
+        if preset not in self._preset_temperatures:
+            preset = self._default_preset
+
+        self._active_preset = preset
+        self._manual_override = False
+        self._attr_preset_mode = preset
+        self._set_target_temperature(self._get_preset_temperature(preset), reason=reason)
+
+        if log_info:
+            _LOGGER.info(
+                "Preset changed to %s (target=%.1f)",
+                preset,
+                self._attr_target_temperature,
+            )
+
+        await self._async_update_output_hook()
+        self.async_write_ha_state()
+
+    async def _async_apply_manual_override(self, temperature: float) -> None:
+        self._manual_override = True
+        self._attr_preset_mode = PRESET_MANUAL
+        self._set_target_temperature(temperature, reason="manual_override")
+        _LOGGER.info("Manual temperature override to %.1f", self._attr_target_temperature)
+        await self._async_update_output_hook()
+        self.async_write_ha_state()
+
+    async def _async_restore_state(self) -> None:
+        last_state = await self.async_get_last_state()
+        if last_state is None:
+            return
+
+        restored_hvac: HVACMode | None = None
+        try:
+            restored_hvac = HVACMode(last_state.state)
+        except ValueError:
+            restored_hvac = None
+
+        if restored_hvac in self._attr_hvac_modes:
+            self._attr_hvac_mode = restored_hvac
+
+        preset_mode = last_state.attributes.get(ATTR_PRESET_MODE)
+        active_preset = last_state.attributes.get("active_preset")
+
+        if isinstance(active_preset, str) and active_preset in self._preset_temperatures:
+            self._active_preset = active_preset
+        elif isinstance(preset_mode, str) and preset_mode in self._preset_temperatures:
+            self._active_preset = preset_mode
+        else:
+            self._active_preset = self._default_preset
+
+        self._manual_override = bool(
+            preset_mode == PRESET_MANUAL or last_state.attributes.get("manual_override")
+        )
+        self._attr_preset_mode = PRESET_MANUAL if self._manual_override else self._active_preset
+
+        restored_target = last_state.attributes.get(ATTR_TEMPERATURE)
+        if restored_target is not None:
+            restored_target = _coerce_float(restored_target, self._attr_target_temperature)
+
+        if self._manual_override:
+            if restored_target is not None:
+                self._set_target_temperature(restored_target, reason="restore_manual")
+            else:
+                self._set_target_temperature(
+                    self._get_preset_temperature(self._active_preset),
+                    reason="restore_manual_default",
+                )
+        else:
+            if restored_target is not None:
+                self._set_target_temperature(restored_target, reason="restore_target")
+            else:
+                self._set_target_temperature(
+                    self._get_preset_temperature(self._active_preset),
+                    reason="restore_preset",
+                )
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
 
-        self._attr_target_temperature = float(temperature)
-        _LOGGER.info("PID Climate setpoint changed to %.1f °C", self._attr_target_temperature)
+        await self._async_apply_manual_override(float(temperature))
 
-        await self._async_update_output_hook()
-        self.async_write_ha_state()
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        if preset_mode not in self._attr_preset_modes:
+            _LOGGER.debug("Ignoring unknown preset %s", preset_mode)
+            return
+
+        await self._async_apply_preset(
+            preset_mode,
+            reason="preset_selection",
+            log_info=True,
+        )
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        if hvac_mode not in self._attr_hvac_modes:
+            _LOGGER.debug("Ignoring unsupported HVAC mode: %s", hvac_mode)
+            return
+
+        was_off = self._attr_hvac_mode == HVACMode.OFF
+        if hvac_mode == self._attr_hvac_mode:
+            return
+
         self._attr_hvac_mode = hvac_mode
 
-        if hvac_mode != HVACMode.OFF:
-            self._last_hvac_mode = hvac_mode
-            self._attr_target_temperature = self._default_target_temperature(hvac_mode)
-            self._knx_hvac_mode = 0 if hvac_mode == HVACMode.AUTO else 1
-        else:
-            self._knx_hvac_mode = None
-
-        _LOGGER.info(
-            "PID Climate HVAC mode changed to %s (target=%.1f °C)",
-            hvac_mode,
-            self._attr_target_temperature,
-        )
+        if hvac_mode == HVACMode.HEAT and was_off:
+            await self._async_stop_pwm_task(reason="hvac_off_to_heat")
+            self._manual_override = False
+            self._active_preset = self._default_preset
+            self._attr_preset_mode = self._active_preset
+            self._set_target_temperature(
+                self._get_preset_temperature(self._active_preset),
+                reason="default_preset",
+            )
+            _LOGGER.info(
+                "HVAC OFF -> HEAT for %s; applying default preset %s (target=%.1f)",
+                self.entity_id,
+                self._active_preset,
+                self._attr_target_temperature,
+            )
 
         await self._async_update_output_hook()
         self.async_write_ha_state()
@@ -328,7 +449,7 @@ class PIDClimate(ClimateEntity):
         temperature, error = _extract_temperature_value(new_state)
         if temperature is None:
             if error == "non_numeric":
-                _LOGGER.warning(
+                _LOGGER.debug(
                     "Non-numeric temperature state for %s: %s",
                     self._temperature_entity_id,
                     new_state.state if new_state is not None else None,
@@ -383,16 +504,11 @@ class PIDClimate(ClimateEntity):
         await self.async_set_hvac_mode(HVACMode.OFF)
 
     async def async_turn_on(self) -> None:
-        if self._attr_hvac_mode != HVACMode.OFF:
-            return
-
-        target_mode = self._last_hvac_mode
-        if target_mode == HVACMode.OFF or target_mode not in self._attr_hvac_modes:
-            target_mode = HVACMode.HEAT if HVACMode.HEAT in self._attr_hvac_modes else HVACMode.AUTO
-
-        await self.async_set_hvac_mode(target_mode)
+        await self.async_set_hvac_mode(HVACMode.HEAT)
 
     async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        await self._async_restore_state()
         self._async_subscribe_temperature_listener()
         self._async_sync_current_temperature_from_state(
             self.hass.states.get(self._temperature_entity_id),
@@ -437,7 +553,7 @@ class PIDClimate(ClimateEntity):
             if log_initial:
                 raw_state = state.state if state is not None else None
                 if error == "non_numeric":
-                    _LOGGER.warning(
+                    _LOGGER.debug(
                         "Non-numeric temperature state for %s: %s",
                         self._temperature_entity_id,
                         raw_state,
@@ -597,7 +713,15 @@ class PIDClimate(ClimateEntity):
             self._attr_current_humidity = None
             self._async_unsubscribe_humidity_listener()
 
-        self._knx_mode_temperatures = _resolve_hvac_mode_temperatures(entry)
+        previous_pwm_period = self._pwm_period_minutes
+        previous_active_preset_temp = self._preset_temperatures.get(self._active_preset)
+
+        self._preset_temperatures = _resolve_preset_temperatures(entry)
+        self._default_preset = _resolve_default_preset(entry, self._preset_temperatures)
+        if self._active_preset not in self._preset_temperatures:
+            self._active_preset = self._default_preset
+            if not self._manual_override:
+                self._attr_preset_mode = self._active_preset
         self._attr_min_temp = _coerce_float(
             entry.options.get(CONF_MIN_TEMPERATURE, entry.data.get(CONF_MIN_TEMPERATURE)),
             DEFAULT_MIN_TEMPERATURE,
@@ -614,6 +738,21 @@ class PIDClimate(ClimateEntity):
             entry.options.get(CONF_PWM_PERIOD, entry.data.get(CONF_PWM_PERIOD)),
             DEFAULT_PWM_PERIOD,
         )
+        if self._pwm_period_minutes != previous_pwm_period:
+            await self._async_stop_pwm_task(reason="pwm_period_change")
+
+        if not self._manual_override:
+            new_active_temp = self._preset_temperatures.get(self._active_preset)
+            if new_active_temp is not None and (
+                previous_active_preset_temp is None
+                or not math.isclose(
+                    new_active_temp,
+                    previous_active_preset_temp,
+                    rel_tol=0.0,
+                    abs_tol=1e-6,
+                )
+            ):
+                self._set_target_temperature(new_active_temp, reason="preset_temp_update")
         self._attr_hvac_modes = self._compute_hvac_modes()
         if self._attr_hvac_mode not in self._attr_hvac_modes:
             self._attr_hvac_mode = HVACMode.OFF if HVACMode.OFF in self._attr_hvac_modes else self._attr_hvac_modes[0]
@@ -642,18 +781,28 @@ class PIDClimate(ClimateEntity):
         self._pwm_output_min = None
         self._pwm_output_max = None
 
-    async def _async_pwm_loop(
-        self,
-        output_on: float,
-        output_off: float,
-        on_seconds: float,
-        off_seconds: float,
-    ) -> None:
+    async def _async_pwm_loop(self) -> None:
         try:
             while True:
-                await self._async_set_output_value(output_on)
+                ratio = self._pwm_ratio
+                period_seconds = self._pwm_period_seconds
+                output_min = self._pwm_output_min
+                output_max = self._pwm_output_max
+
+                if (
+                    ratio is None
+                    or period_seconds is None
+                    or output_min is None
+                    or output_max is None
+                ):
+                    await asyncio.sleep(1)
+                    continue
+
+                on_seconds = period_seconds * ratio
+                off_seconds = period_seconds - on_seconds
+                await self._async_set_output_value(output_max)
                 await asyncio.sleep(on_seconds)
-                await self._async_set_output_value(output_off)
+                await self._async_set_output_value(output_min)
                 await asyncio.sleep(off_seconds)
         except asyncio.CancelledError:
             raise
@@ -688,14 +837,7 @@ class PIDClimate(ClimateEntity):
             await self._async_set_stable_output(output_max, "on", "duty=100%")
             return
 
-        restart_pwm = True
         if self._pwm_task is not None:
-            same_ratio = self._pwm_ratio is not None and math.isclose(
-                self._pwm_ratio,
-                duty_ratio,
-                rel_tol=0.0,
-                abs_tol=1e-6,
-            )
             same_period = self._pwm_period_seconds is not None and math.isclose(
                 self._pwm_period_seconds,
                 period_seconds,
@@ -703,37 +845,40 @@ class PIDClimate(ClimateEntity):
                 abs_tol=0.01,
             )
             same_range = self._pwm_output_min == output_min and self._pwm_output_max == output_max
-            restart_pwm = not (same_ratio and same_period and same_range)
-
-            if restart_pwm:
-                if self._pwm_ratio is not None and not same_ratio:
+            if same_period and same_range:
+                if self._pwm_ratio is None or not math.isclose(
+                    self._pwm_ratio,
+                    duty_ratio,
+                    rel_tol=0.0,
+                    abs_tol=1e-6,
+                ):
                     _LOGGER.debug(
-                        "PWM ratio change for %s: %.1f%% -> %.1f%%",
+                        "PWM ratio update for %s: %.1f%% -> %.1f%%",
                         self.entity_id,
-                        self._pwm_ratio * 100.0,
+                        (self._pwm_ratio or 0.0) * 100.0,
                         duty_ratio * 100.0,
                     )
-                await self._async_stop_pwm_task(reason="pwm_update")
+                self._pwm_ratio = duty_ratio
+                return
 
-        if restart_pwm:
-            on_seconds = period_seconds * duty_ratio
-            off_seconds = period_seconds - on_seconds
-            _LOGGER.debug(
-                "Starting PWM for %s (period=%.1fs duty=%.1f%% on=%.1fs off=%.1fs)",
-                self.entity_id,
-                period_seconds,
-                duty_ratio * 100.0,
-                on_seconds,
-                off_seconds,
-            )
-            self._pwm_task = self.hass.async_create_task(
-                self._async_pwm_loop(output_max, output_min, on_seconds, off_seconds)
-            )
-            self._pwm_ratio = duty_ratio
-            self._pwm_period_seconds = period_seconds
-            self._pwm_output_min = output_min
-            self._pwm_output_max = output_max
-            self._pwm_output_mode = "pwm"
+            await self._async_stop_pwm_task(reason="pwm_update")
+
+        self._pwm_ratio = duty_ratio
+        self._pwm_period_seconds = period_seconds
+        self._pwm_output_min = output_min
+        self._pwm_output_max = output_max
+        on_seconds = period_seconds * duty_ratio
+        off_seconds = period_seconds - on_seconds
+        _LOGGER.debug(
+            "Starting PWM for %s (period=%.1fs duty=%.1f%% on=%.1fs off=%.1fs)",
+            self.entity_id,
+            period_seconds,
+            duty_ratio * 100.0,
+            on_seconds,
+            off_seconds,
+        )
+        self._pwm_task = self.hass.async_create_task(self._async_pwm_loop())
+        self._pwm_output_mode = "pwm"
 
     async def _async_update_output_hook(self) -> None:
         if self._is_removing:
@@ -767,6 +912,14 @@ class PIDClimate(ClimateEntity):
 
         current = self._attr_current_temperature
         target = self._attr_target_temperature
+
+        if self._attr_hvac_mode != HVACMode.OFF:
+            _LOGGER.debug(
+                "PID recalculation for %s (current=%s target=%s)",
+                self.entity_id,
+                current,
+                target,
+            )
 
         if self._attr_hvac_mode == HVACMode.OFF:
             await self._async_apply_pwm(output_min=output_min, output_max=output_max, duty_ratio=0.0)

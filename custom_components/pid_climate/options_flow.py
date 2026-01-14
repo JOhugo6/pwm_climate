@@ -21,11 +21,13 @@ from .const import (
     DEFAULT_TEMPERATURE_STEP,
     DEFAULT_PWM_PERIOD,
 
-    # HVAC
+    CONF_DEFAULT_PRESET,
     CONF_HVAC_MODES,
-    HVAC_MODE_LABELS,
-    HVAC_MODE_DEFAULT_TEMPERATURES,
-    HVAC_MODE_TEMPERATURE_KEYS,
+    DEFAULT_PRESET,
+    PRESET_LABELS,
+    PRESET_DEFAULT_TEMPERATURES,
+    PRESET_TEMPERATURE_KEYS,
+    PRESET_NAMES,
 )
 
 
@@ -41,7 +43,7 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
             value = self.entry.data.get(key, default)
         return default if value is None else value
 
-    def _apply_flat_hvac_mode_temperatures(
+    def _apply_flat_preset_temperatures(
         self,
         base: dict[int, float],
         source: dict[str, Any] | None,
@@ -49,17 +51,17 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
         if not isinstance(source, dict):
             return base
 
-        for mode_id, key in HVAC_MODE_TEMPERATURE_KEYS.items():
+        for preset_id, key in PRESET_TEMPERATURE_KEYS.items():
             if key not in source:
                 continue
             try:
-                base[mode_id] = float(source[key])
+                base[preset_id] = float(source[key])
             except (TypeError, ValueError):
                 continue
 
         return base
 
-    def _merge_hvac_mode_temperatures(
+    def _merge_preset_temperatures(
         self,
         base: dict[int, float],
         raw: dict[Any, Any] | None,
@@ -69,24 +71,24 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
 
         for key, value in raw.items():
             try:
-                mode_id = int(key)
+                preset_id = int(key)
             except (TypeError, ValueError):
                 continue
-            if mode_id not in base:
+            if preset_id not in base:
                 continue
             try:
-                base[mode_id] = float(value)
+                base[preset_id] = float(value)
             except (TypeError, ValueError):
                 continue
 
         return base
 
-    def _build_hvac_mode_defaults(self) -> dict[int, float]:
-        defaults = dict(HVAC_MODE_DEFAULT_TEMPERATURES)
-        defaults = self._apply_flat_hvac_mode_temperatures(defaults, self.entry.data)
-        defaults = self._merge_hvac_mode_temperatures(defaults, self.entry.data.get(CONF_HVAC_MODES))
-        defaults = self._apply_flat_hvac_mode_temperatures(defaults, self.entry.options)
-        defaults = self._merge_hvac_mode_temperatures(defaults, self.entry.options.get(CONF_HVAC_MODES))
+    def _build_preset_defaults(self) -> dict[int, float]:
+        defaults = dict(PRESET_DEFAULT_TEMPERATURES)
+        defaults = self._apply_flat_preset_temperatures(defaults, self.entry.data)
+        defaults = self._merge_preset_temperatures(defaults, self.entry.data.get(CONF_HVAC_MODES))
+        defaults = self._apply_flat_preset_temperatures(defaults, self.entry.options)
+        defaults = self._merge_preset_temperatures(defaults, self.entry.options.get(CONF_HVAC_MODES))
         return defaults
 
     async def async_step_init(
@@ -99,16 +101,16 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
         # ─────────────────────────────────────────────
         # HVAC mode temperature sliders
         # ─────────────────────────────────────────────
-        hvac_mode_fields: dict[Any, Any] = {}
+        preset_fields: dict[Any, Any] = {}
 
-        current_hvac_modes = self._build_hvac_mode_defaults()
+        current_presets = self._build_preset_defaults()
 
-        for mode_id in HVAC_MODE_LABELS:
-            key = HVAC_MODE_TEMPERATURE_KEYS[mode_id]
-            hvac_mode_fields[
+        for preset_id in PRESET_LABELS:
+            key = PRESET_TEMPERATURE_KEYS[preset_id]
+            preset_fields[
                 vol.Optional(
                     key,
-                    default=current_hvac_modes[mode_id],
+                    default=current_presets[preset_id],
                 )
             ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
@@ -121,6 +123,16 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         schema_data = {
+                vol.Optional(
+                    CONF_DEFAULT_PRESET,
+                    default=self._get_option_value(CONF_DEFAULT_PRESET, DEFAULT_PRESET),
+                ): selector.SelectSelector(
+                    selector.SelectSelectorConfig(
+                        options=PRESET_NAMES,
+                        mode=selector.SelectSelectorMode.DROPDOWN,
+                    )
+                ),
+
                 vol.Optional(
                     CONF_MIN_TEMPERATURE,
                     default=self._get_option_value(CONF_MIN_TEMPERATURE, DEFAULT_MIN_TEMPERATURE),
@@ -168,7 +180,7 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
                 # HVAC modes → target temperatures
             }
 
-        schema_data.update(hvac_mode_fields)
+        schema_data.update(preset_fields)
         schema = vol.Schema(schema_data)
 
         return self.async_show_form(
