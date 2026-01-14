@@ -219,7 +219,10 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         self._attr_unique_id = entry.entry_id
         self._attr_name = entry.data.get(CONF_NAME, entry.title)
 
-        self._temperature_entity_id: str = entry.data[CONF_TEMPERATURE_ENTITY]
+        self._temperature_entity_id: str | None = entry.options.get(
+            CONF_TEMPERATURE_ENTITY,
+            entry.data.get(CONF_TEMPERATURE_ENTITY),
+        )
         self._output_entity_id: str = entry.data[CONF_OUTPUT_ENTITY]
         self._humidity_sensor_entity_id: str | None = entry.data.get(CONF_HUMIDITY_ENTITY)
 
@@ -642,7 +645,7 @@ class PIDClimate(ClimateEntity, RestoreEntity):
             [self._temperature_entity_id],
             self._async_temperature_changed,
         )
-        _LOGGER.info(
+        _LOGGER.debug(
             "Registered temperature listener for %s (%s)",
             self.entity_id,
             self._temperature_entity_id,
@@ -677,8 +680,14 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         if self._is_removing:
             return
 
-        temperature_entity_id = entry.data.get(CONF_TEMPERATURE_ENTITY)
-        humidity_entity_id = entry.data.get(CONF_HUMIDITY_ENTITY)
+        temperature_entity_id = entry.options.get(
+            CONF_TEMPERATURE_ENTITY,
+            entry.data.get(CONF_TEMPERATURE_ENTITY),
+        )
+        humidity_entity_id = entry.options.get(
+            CONF_HUMIDITY_ENTITY,
+            entry.data.get(CONF_HUMIDITY_ENTITY),
+        )
 
         if isinstance(temperature_entity_id, str) and temperature_entity_id:
             if temperature_entity_id != self._temperature_entity_id:
