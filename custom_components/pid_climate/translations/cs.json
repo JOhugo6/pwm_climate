@@ -26,6 +26,7 @@
   "options": {
     "step": {
       "init": {
+        "title": "Nastavení PID termostatu",
         "data": {
           "min_temperature": "Minimální teplota",
           "max_temperature": "Maximální teplota",

@@ -30,6 +30,7 @@
   "options": {
     "step": {
       "init": {
+        "title": "PID thermostat settings",
         "data": {
           "min_temperature": "Minimum temperature",
           "max_temperature": "Maximum temperature",
