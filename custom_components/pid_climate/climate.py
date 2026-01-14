@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from collections.abc import Callable, Mapping
@@ -190,6 +191,13 @@ class PIDClimate(ClimateEntity):
         self._unsub_entry_update_listener: Callable[[], None] | None = None
         self._last_output_value: float | None = None
         self._is_removing = False
+        self._pwm_task: asyncio.Task | None = None
+        self._pwm_lock = asyncio.Lock()
+        self._pwm_ratio: float | None = None
+        self._pwm_period_seconds: float | None = None
+        self._pwm_output_min: float | None = None
+        self._pwm_output_max: float | None = None
+        self._pwm_output_mode: str | None = None
 
         _LOGGER.debug(
             "PIDClimate init name=%s temp_sensor=%s output=%s pwm_period_min=%s",
@@ -294,6 +302,7 @@ class PIDClimate(ClimateEntity):
             temperature,
         )
         self.async_write_ha_state()
+        self.hass.async_create_task(self._async_update_output_hook())
 
     async def async_turn_off(self) -> None:
         await self.async_set_hvac_mode(HVACMode.OFF)
@@ -321,10 +330,12 @@ class PIDClimate(ClimateEntity):
         )
 
         self.async_write_ha_state()
+        await self._async_update_output_hook()
 
     async def async_will_remove_from_hass(self) -> None:
         self._is_removing = True
         self._async_unsubscribe_temperature_listener()
+        await self._async_stop_pwm_task(reason="remove")
 
         if self._unsub_entry_update_listener is not None:
             self._unsub_entry_update_listener()
@@ -440,8 +451,130 @@ class PIDClimate(ClimateEntity):
             self._attr_hvac_mode = HVACMode.OFF if HVACMode.OFF in self._attr_hvac_modes else self._attr_hvac_modes[0]
 
         self.async_write_ha_state()
+        await self._async_update_output_hook()
+
+    async def _async_stop_pwm_task(self, *, reason: str | None = None) -> None:
+        if self._pwm_task is None:
+            return
+
+        if reason:
+            _LOGGER.debug("Stopping PWM for %s (%s)", self.entity_id, reason)
+        else:
+            _LOGGER.debug("Stopping PWM for %s", self.entity_id)
+
+        self._pwm_task.cancel()
+        try:
+            await self._pwm_task
+        except asyncio.CancelledError:
+            pass
+
+        self._pwm_task = None
+        self._pwm_ratio = None
+        self._pwm_period_seconds = None
+        self._pwm_output_min = None
+        self._pwm_output_max = None
+
+    async def _async_pwm_loop(
+        self,
+        output_on: float,
+        output_off: float,
+        on_seconds: float,
+        off_seconds: float,
+    ) -> None:
+        try:
+            while True:
+                await self._async_set_output_value(output_on)
+                await asyncio.sleep(on_seconds)
+                await self._async_set_output_value(output_off)
+                await asyncio.sleep(off_seconds)
+        except asyncio.CancelledError:
+            raise
+
+    async def _async_set_stable_output(self, value: float, mode: str, reason: str) -> None:
+        if mode != self._pwm_output_mode:
+            if mode == "off":
+                _LOGGER.info("PWM output fixed OFF for %s (%s)", self.entity_id, reason)
+            elif mode == "on":
+                _LOGGER.info("PWM output fixed ON for %s (%s)", self.entity_id, reason)
+        self._pwm_output_mode = mode
+        await self._async_set_output_value(value)
+
+    async def _async_apply_pwm(
+        self,
+        *,
+        output_min: float,
+        output_max: float,
+        duty_ratio: float,
+    ) -> None:
+        period_minutes = max(self._pwm_period_minutes, 1)
+        period_seconds = float(period_minutes) * 60.0
+        duty_ratio = max(0.0, min(1.0, duty_ratio))
+
+        if self._attr_hvac_mode == HVACMode.OFF or duty_ratio <= 0.0:
+            await self._async_stop_pwm_task(reason="off_or_zero")
+            await self._async_set_stable_output(output_min, "off", "duty=0%/hvac_off")
+            return
+
+        if duty_ratio >= 1.0:
+            await self._async_stop_pwm_task(reason="full_duty")
+            await self._async_set_stable_output(output_max, "on", "duty=100%")
+            return
+
+        restart_pwm = True
+        if self._pwm_task is not None:
+            same_ratio = self._pwm_ratio is not None and math.isclose(
+                self._pwm_ratio,
+                duty_ratio,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            )
+            same_period = self._pwm_period_seconds is not None and math.isclose(
+                self._pwm_period_seconds,
+                period_seconds,
+                rel_tol=0.0,
+                abs_tol=0.01,
+            )
+            same_range = self._pwm_output_min == output_min and self._pwm_output_max == output_max
+            restart_pwm = not (same_ratio and same_period and same_range)
+
+            if restart_pwm:
+                if self._pwm_ratio is not None and not same_ratio:
+                    _LOGGER.debug(
+                        "PWM ratio change for %s: %.1f%% -> %.1f%%",
+                        self.entity_id,
+                        self._pwm_ratio * 100.0,
+                        duty_ratio * 100.0,
+                    )
+                await self._async_stop_pwm_task(reason="pwm_update")
+
+        if restart_pwm:
+            on_seconds = period_seconds * duty_ratio
+            off_seconds = period_seconds - on_seconds
+            _LOGGER.debug(
+                "Starting PWM for %s (period=%.1fs duty=%.1f%% on=%.1fs off=%.1fs)",
+                self.entity_id,
+                period_seconds,
+                duty_ratio * 100.0,
+                on_seconds,
+                off_seconds,
+            )
+            self._pwm_task = self.hass.async_create_task(
+                self._async_pwm_loop(output_max, output_min, on_seconds, off_seconds)
+            )
+            self._pwm_ratio = duty_ratio
+            self._pwm_period_seconds = period_seconds
+            self._pwm_output_min = output_min
+            self._pwm_output_max = output_max
+            self._pwm_output_mode = "pwm"
 
     async def _async_update_output_hook(self) -> None:
+        if self._is_removing:
+            return
+
+        async with self._pwm_lock:
+            await self._async_update_output_internal()
+
+    async def _async_update_output_internal(self) -> None:
         output_state = self.hass.states.get(self._output_entity_id)
         output_min = _coerce_float(output_state.attributes.get("min") if output_state else None, 0.0)
         output_max = _coerce_float(
@@ -468,17 +601,7 @@ class PIDClimate(ClimateEntity):
         target = self._attr_target_temperature
 
         if self._attr_hvac_mode == HVACMode.OFF:
-            new_value = output_min
-            if output_step > 0:
-                new_value = round(new_value / output_step) * output_step
-            if new_value != self._last_output_value:
-                _LOGGER.debug(
-                    "Output update: current=%s target=%s value=%s",
-                    current,
-                    target,
-                    new_value,
-                )
-            await self._async_set_output_value(new_value)
+            await self._async_apply_pwm(output_min=output_min, output_max=output_max, duty_ratio=0.0)
             return
 
         if current is None:
@@ -517,15 +640,27 @@ class PIDClimate(ClimateEntity):
             elif new_value > output_max:
                 new_value = output_max
 
-        if new_value != self._last_output_value:
-            _LOGGER.debug(
-                "Output update: current=%s target=%s value=%s",
-                current,
-                target,
-                new_value,
-            )
+        span = output_max - output_min
+        if span <= 0:
+            duty_ratio = 1.0 if new_value > 0 else 0.0
+        else:
+            duty_ratio = (new_value - output_min) / span
 
-        await self._async_set_output_value(new_value)
+        duty_ratio = max(0.0, min(1.0, duty_ratio))
+
+        _LOGGER.debug(
+            "PWM update: current=%s target=%s output=%s duty=%.1f%%",
+            current,
+            target,
+            new_value,
+            duty_ratio * 100.0,
+        )
+
+        await self._async_apply_pwm(
+            output_min=output_min,
+            output_max=output_max,
+            duty_ratio=duty_ratio,
+        )
 
     async def _async_set_output_to_min(self) -> None:
         output_state = self.hass.states.get(self._output_entity_id)
