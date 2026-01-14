@@ -470,7 +470,6 @@ class PIDClimate(ClimateEntity, RestoreEntity):
             temperature,
         )
         self.async_write_ha_state()
-        self.hass.async_create_task(self._async_update_output_hook())
 
     @callback
     def _async_humidity_changed(self, event: Event) -> None:
