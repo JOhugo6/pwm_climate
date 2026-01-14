@@ -442,18 +442,80 @@ class PIDClimate(ClimateEntity):
         self.async_write_ha_state()
 
     async def _async_update_output_hook(self) -> None:
+        output_state = self.hass.states.get(self._output_entity_id)
+        output_min = _coerce_float(output_state.attributes.get("min") if output_state else None, 0.0)
+        output_max = _coerce_float(
+            output_state.attributes.get("max") if output_state else None,
+            output_min,
+        )
+        output_step = _coerce_float(
+            output_state.attributes.get("step") if output_state else None,
+            0.0,
+        )
+
+        if not math.isfinite(output_min):
+            output_min = 0.0
+        if not math.isfinite(output_max):
+            output_max = output_min
+        if not math.isfinite(output_step):
+            output_step = 0.0
+
+        output_min = max(output_min, 0.0)
+        if output_max < output_min:
+            output_max = output_min
+
+        current = self._attr_current_temperature
+        target = self._attr_target_temperature
+
         if self._attr_hvac_mode == HVACMode.OFF:
-            await self._async_set_output_to_min()
+            new_value = output_min
+            if output_step > 0:
+                new_value = round(new_value / output_step) * output_step
+            if new_value != self._last_output_value:
+                _LOGGER.debug(
+                    "Output update: current=%s target=%s value=%s",
+                    current,
+                    target,
+                    new_value,
+                )
+            await self._async_set_output_value(new_value)
             return
 
-        _LOGGER.debug(
-            "Output hook: hvac_mode=%s current=%s target=%s output_entity=%s pwm_period_min=%s",
-            self._attr_hvac_mode,
-            self._attr_current_temperature,
-            self._attr_target_temperature,
-            self._output_entity_id,
-            self._pwm_period_minutes,
-        )
+        if current is None:
+            _LOGGER.debug(
+                "Output hook: missing current temperature for %s; skipping output update",
+                self.entity_id,
+            )
+            return
+
+        if current >= target:
+            new_value = output_min
+        else:
+            delta = target - current
+            span = output_max - output_min
+            new_value = output_min + (delta * span)
+
+        if new_value < output_min:
+            new_value = output_min
+        elif new_value > output_max:
+            new_value = output_max
+
+        if output_step > 0:
+            new_value = round(new_value / output_step) * output_step
+            if new_value < output_min:
+                new_value = output_min
+            elif new_value > output_max:
+                new_value = output_max
+
+        if new_value != self._last_output_value:
+            _LOGGER.debug(
+                "Output update: current=%s target=%s value=%s",
+                current,
+                target,
+                new_value,
+            )
+
+        await self._async_set_output_value(new_value)
 
     async def _async_set_output_to_min(self) -> None:
         output_state = self.hass.states.get(self._output_entity_id)
