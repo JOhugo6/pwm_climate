@@ -10,8 +10,9 @@
           "humidity_entity": "Humidity sensor entity (optional)",
           "output_entity": "Output entity (percentage)",
 
-          "min_temp": "Minimum temperature (°C)",
-          "max_temp": "Maximum temperature (°C)",
+          "min_temperature": "Minimum temperature",
+          "max_temperature": "Maximum temperature",
+          "temperature_step": "Temperature step",
 
           "pwm_period": "PWM period (minutes)",
 
