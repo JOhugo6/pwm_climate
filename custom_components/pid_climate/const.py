@@ -20,11 +20,12 @@ CONF_MAX_TEMPERATURE = "max_temperature"
 CONF_PWM_PERIOD = "pwm_period"
 
 CONF_HVAC_MODES = "hvac_modes"
-CONF_HVAC_MODE_AUTO_TEMPERATURE = "hvac_auto_temperature"
-CONF_HVAC_MODE_COMFORT_TEMPERATURE = "hvac_comfort_temperature"
-CONF_HVAC_MODE_STANDBY_TEMPERATURE = "hvac_standby_temperature"
-CONF_HVAC_MODE_ECONOMY_TEMPERATURE = "hvac_economy_temperature"
-CONF_HVAC_MODE_BUILDING_PROTECTION_TEMPERATURE = "hvac_building_protection_temperature"
+CONF_DEFAULT_PRESET = "default_preset"
+CONF_PRESET_AUTO_TEMPERATURE = "hvac_auto_temperature"
+CONF_PRESET_COMFORT_TEMPERATURE = "hvac_comfort_temperature"
+CONF_PRESET_READY_TEMPERATURE = "hvac_standby_temperature"
+CONF_PRESET_ECO_TEMPERATURE = "hvac_economy_temperature"
+CONF_PRESET_BUILDING_PROTECTION_TEMPERATURE = "hvac_building_protection_temperature"
 
 # ─────────────────────────────────────────────
 # Defaults
@@ -41,26 +42,30 @@ DEFAULT_PWM_PERIOD = 15  # minutes
 # key = KNX value
 # value = default target temperature (°C)
 
-HVAC_MODE_DEFAULT_TEMPERATURES: dict[int, float] = {
+PRESET_DEFAULT_TEMPERATURES: dict[int, float] = {
     0: 22.0,  # Auto
-    1: 24.0,  # Comfort
-    2: 22.0,  # Standby
-    3: 21.0,  # Economy
-    4: 8.0,   # Building protection
+    1: 24.0,  # Komfort
+    2: 22.0,  # Připraveno
+    3: 21.0,  # ECO
+    4: 8.0,   # Ochrana budovy
 }
 
-HVAC_MODE_LABELS: dict[int, str] = {
+PRESET_LABELS: dict[int, str] = {
     0: "Auto",
-    1: "Comfort",
-    2: "Standby",
-    3: "Economy",
-    4: "Building protection",
+    1: "Komfort",
+    2: "Připraveno",
+    3: "ECO",
+    4: "Ochrana budovy",
 }
 
-HVAC_MODE_TEMPERATURE_KEYS: dict[int, str] = {
-    0: CONF_HVAC_MODE_AUTO_TEMPERATURE,
-    1: CONF_HVAC_MODE_COMFORT_TEMPERATURE,
-    2: CONF_HVAC_MODE_STANDBY_TEMPERATURE,
-    3: CONF_HVAC_MODE_ECONOMY_TEMPERATURE,
-    4: CONF_HVAC_MODE_BUILDING_PROTECTION_TEMPERATURE,
+PRESET_TEMPERATURE_KEYS: dict[int, str] = {
+    0: CONF_PRESET_AUTO_TEMPERATURE,
+    1: CONF_PRESET_COMFORT_TEMPERATURE,
+    2: CONF_PRESET_READY_TEMPERATURE,
+    3: CONF_PRESET_ECO_TEMPERATURE,
+    4: CONF_PRESET_BUILDING_PROTECTION_TEMPERATURE,
 }
+
+PRESET_NAMES: list[str] = list(PRESET_LABELS.values())
+DEFAULT_PRESET = PRESET_LABELS[0]
+PRESET_MANUAL = "manual"
