@@ -115,7 +115,6 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
                     min=5,
                     max=40,
                     step=0.5,
-                    label=f"Target temperature - {HVAC_MODE_LABELS[mode_id]}",
                     unit_of_measurement="°C",
                     mode=selector.NumberSelectorMode.SLIDER,
                 )
@@ -130,7 +129,6 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
                         min=5,
                         max=40,
                         step=0.5,
-                        label="Minimum temperature",
                         unit_of_measurement="°C",
                         mode=selector.NumberSelectorMode.SLIDER,
                     )
@@ -144,7 +142,6 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
                         min=5,
                         max=40,
                         step=0.5,
-                        label="Maximum temperature",
                         unit_of_measurement="°C",
                         mode=selector.NumberSelectorMode.SLIDER,
                     )
@@ -158,7 +155,6 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
                         min=0.1,
                         max=2.0,
                         step=0.1,
-                        label="Temperature step",
                         unit_of_measurement="°C",
                         mode=selector.NumberSelectorMode.SLIDER,
                     )

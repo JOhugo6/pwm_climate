@@ -6,23 +6,18 @@
         "description": "Vytvoření nového termostatu řízeného PID regulátorem.",
         "data": {
           "name": "Název termostatu",
-
           "temperature_entity": "Entita teplotního senzoru",
           "humidity_entity": "Entita senzoru vlhkosti (volitelné)",
           "output_entity": "Výstupní entita (procenta)",
-
           "min_temperature": "Minimální teplota",
           "max_temperature": "Maximální teplota",
           "temperature_step": "Teplotní krok",
-
           "hvac_auto_temperature": "Cílová teplota - Auto",
           "hvac_comfort_temperature": "Cílová teplota - Komfort",
           "hvac_standby_temperature": "Cílová teplota - Standby",
           "hvac_economy_temperature": "Cílová teplota - Ekonomický",
           "hvac_building_protection_temperature": "Cílová teplota - Ochrana budovy",
-
           "pwm_period": "Délka PWM periody (minuty)",
-
           "hvac_modes": "Provozní režimy HVAC a cílové teploty"
         }
       }

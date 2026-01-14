@@ -82,7 +82,6 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     min=5,
                     max=40,
                     step=0.5,
-                    label=f"Target temperature - {HVAC_MODE_LABELS[mode_id]}",
                     unit_of_measurement="°C",
                     mode=selector.NumberSelectorMode.SLIDER,
                 )
@@ -96,7 +95,6 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         selector.EntitySelectorConfig(
                             domain="sensor",
                             include_entities=temperature_entities,
-                            label="Temperature sensor entity",
                         )
                     ),
 
@@ -104,7 +102,6 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelector(
                         selector.EntitySelectorConfig(
                             domain="number",
-                            label="Output entity (percentage)",
                         )
                     ),
 
@@ -112,7 +109,6 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelector(
                         selector.EntitySelectorConfig(
                             domain="sensor",
-                            label="Humidity sensor entity (optional)",
                         )
                     ),
 
@@ -124,7 +120,6 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         min=5,
                         max=40,
                         step=0.5,
-                        label="Minimum temperature",
                         unit_of_measurement="°C",
                         mode=selector.NumberSelectorMode.SLIDER,
                     )
@@ -138,7 +133,6 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         min=5,
                         max=40,
                         step=0.5,
-                        label="Maximum temperature",
                         unit_of_measurement="°C",
                         mode=selector.NumberSelectorMode.SLIDER,
                     )
@@ -152,7 +146,6 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         min=0.1,
                         max=2.0,
                         step=0.1,
-                        label="Temperature step",
                         unit_of_measurement="°C",
                         mode=selector.NumberSelectorMode.SLIDER,
                     )
