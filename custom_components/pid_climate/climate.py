@@ -130,11 +130,6 @@ def _extract_temperature_value(state: State | None) -> tuple[float | None, str |
     return temperature, None
 
 
-def _parse_temperature_state(state: State | None) -> float | None:
-    temperature, _ = _extract_temperature_value(state)
-    return temperature
-
-
 class PIDClimate(ClimateEntity):
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_should_poll = False
@@ -314,8 +309,11 @@ class PIDClimate(ClimateEntity):
         await self.async_set_hvac_mode(target_mode)
 
     async def async_added_to_hass(self) -> None:
-        self._async_sync_current_temperature_from_state(self.hass.states.get(self._temperature_entity_id))
         self._async_subscribe_temperature_listener()
+        self._async_sync_current_temperature_from_state(
+            self.hass.states.get(self._temperature_entity_id),
+            log_initial=True,
+        )
         self.async_on_remove(self._async_unsubscribe_temperature_listener)
 
         self._unsub_entry_update_listener = self._entry.add_update_listener(
@@ -332,12 +330,39 @@ class PIDClimate(ClimateEntity):
             self._unsub_entry_update_listener()
             self._unsub_entry_update_listener = None
 
-    def _async_sync_current_temperature_from_state(self, state: State | None) -> None:
-        temperature = _parse_temperature_state(state)
+    def _async_sync_current_temperature_from_state(
+        self,
+        state: State | None,
+        *,
+        log_initial: bool = False,
+    ) -> bool:
+        temperature, error = _extract_temperature_value(state)
         if temperature is None:
-            return
+            if log_initial:
+                raw_state = state.state if state is not None else None
+                if error == "non_numeric":
+                    _LOGGER.warning(
+                        "Non-numeric temperature state for %s: %s",
+                        self._temperature_entity_id,
+                        raw_state,
+                    )
+                else:
+                    _LOGGER.debug(
+                        "Ignoring invalid temperature state for %s: %s",
+                        self._temperature_entity_id,
+                        raw_state,
+                    )
+            return False
 
         self._attr_current_temperature = temperature
+        if log_initial:
+            _LOGGER.info(
+                "Initial temperature for %s from %s: %s",
+                self.entity_id,
+                self._temperature_entity_id,
+                temperature,
+            )
+        return True
 
     @callback
     def _async_unsubscribe_temperature_listener(self) -> None:
