@@ -282,6 +282,11 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         return [HVACMode.OFF, HVACMode.HEAT]
 
     def _get_preset_temperature(self, preset: str) -> float:
+        auto_preset = PRESET_LABELS.get(0)
+        if preset == auto_preset:
+            fallback_preset = PRESET_LABELS.get(1, preset)
+            preset = self._default_preset if self._default_preset != auto_preset else fallback_preset
+
         temperature = self._preset_temperatures.get(preset)
         if temperature is not None:
             return temperature
@@ -330,7 +335,7 @@ class PIDClimate(ClimateEntity, RestoreEntity):
                 self._attr_target_temperature,
             )
 
-        await self._async_update_output_hook()
+        await self._async_update_output_hook(reason="preset_change")
         self.async_write_ha_state()
 
     async def _async_apply_manual_override(self, temperature: float) -> None:
@@ -338,7 +343,7 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         self._attr_preset_mode = PRESET_MANUAL
         self._set_target_temperature(temperature, reason="manual_override")
         _LOGGER.info("Manual temperature override to %.1f", self._attr_target_temperature)
-        await self._async_update_output_hook()
+        await self._async_update_output_hook(reason="manual_override")
         self.async_write_ha_state()
 
     async def _async_restore_state(self) -> None:
@@ -436,7 +441,7 @@ class PIDClimate(ClimateEntity, RestoreEntity):
                 self._attr_target_temperature,
             )
 
-        await self._async_update_output_hook()
+        await self._async_update_output_hook(reason="hvac_mode_change")
         self.async_write_ha_state()
 
     @callback
@@ -444,33 +449,36 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         if self._is_removing:
             return
 
+        _LOGGER.debug(
+            "Temperature listener triggered for %s",
+            self._temperature_entity_id,
+        )
+
         old_state: State | None = event.data.get("old_state")
-        new_state: State | None = event.data["new_state"]
+        new_state: State | None = event.data.get("new_state")
         if old_state is not None and new_state is not None and old_state.state == new_state.state:
             return
 
         temperature, error = _extract_temperature_value(new_state)
         if temperature is None:
-            if error == "non_numeric":
-                _LOGGER.debug(
-                    "Non-numeric temperature state for %s: %s",
-                    self._temperature_entity_id,
-                    new_state.state if new_state is not None else None,
-                )
-            else:
-                _LOGGER.debug(
-                    "Ignoring invalid temperature state for %s: %s",
-                    self._temperature_entity_id,
-                    new_state.state if new_state is not None else None,
-                )
+            raw_state = new_state.state if new_state is not None else None
+            _LOGGER.warning(
+                "Invalid temperature state for %s: %s (reason=%s)",
+                self._temperature_entity_id,
+                raw_state,
+                error,
+            )
             return
 
+        previous_temperature = self._attr_current_temperature
         self._attr_current_temperature = temperature
         _LOGGER.debug(
-            "Temperature update for %s from %s: %s",
-            self.entity_id,
-            self._temperature_entity_id,
+            "Temperature updated from %s to %s",
+            previous_temperature,
             temperature,
+        )
+        self.hass.async_create_task(
+            self._async_update_output_hook(reason="temperature_change")
         )
         self.async_write_ha_state()
 
@@ -532,7 +540,7 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         )
 
         self.async_write_ha_state()
-        await self._async_update_output_hook()
+        await self._async_update_output_hook(reason="startup")
 
     async def async_will_remove_from_hass(self) -> None:
         self._is_removing = True
@@ -766,7 +774,7 @@ class PIDClimate(ClimateEntity, RestoreEntity):
             self._attr_hvac_mode = HVACMode.OFF if HVACMode.OFF in self._attr_hvac_modes else self._attr_hvac_modes[0]
 
         self.async_write_ha_state()
-        await self._async_update_output_hook()
+        await self._async_update_output_hook(reason="config_update")
 
     async def _async_stop_pwm_task(self, *, reason: str | None = None) -> None:
         if self._pwm_task is None:
@@ -888,12 +896,18 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         self._pwm_task = self.hass.async_create_task(self._async_pwm_loop())
         self._pwm_output_mode = "pwm"
 
-    async def _async_update_output_hook(self) -> None:
+    async def _async_update_output_hook(self, *, reason: str = "state_change") -> None:
         if self._is_removing:
             return
 
-        async with self._pwm_lock:
-            await self._async_update_output_internal()
+        _LOGGER.debug(
+            "PID placeholder recalculation for %s (reason=%s current=%s target=%s hvac=%s)",
+            self.entity_id,
+            reason,
+            self._attr_current_temperature,
+            self._attr_target_temperature,
+            self._attr_hvac_mode,
+        )
 
     async def _async_update_output_internal(self) -> None:
         output_state = self.hass.states.get(self._output_entity_id)
