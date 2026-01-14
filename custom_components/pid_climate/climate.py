@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -38,6 +39,9 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(DOMAIN)
+
+MIN_VALID_TEMPERATURE = -50.0
+MAX_VALID_TEMPERATURE = 150.0
 
 
 async def async_setup_entry(
@@ -96,26 +100,39 @@ def _resolve_hvac_mode_temperatures(entry: ConfigEntry) -> dict[int, float]:
     return temperatures
 
 
-def _parse_temperature_state(state: State | None) -> float | None:
+def _extract_temperature_value(state: State | None) -> tuple[float | None, str | None]:
     if state is None:
-        return None
+        return None, "missing"
 
     raw = state.state
     if raw is None:
-        return None
+        return None, "missing"
 
     value = str(raw).strip()
     if not value:
-        return None
+        return None, "missing"
 
     lowered = value.lower()
     if lowered in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-        return None
+        return None, "invalid_state"
 
     try:
-        return float(value)
+        temperature = float(value)
     except ValueError:
-        return None
+        return None, "non_numeric"
+
+    if not math.isfinite(temperature):
+        return None, "out_of_range"
+
+    if temperature < MIN_VALID_TEMPERATURE or temperature > MAX_VALID_TEMPERATURE:
+        return None, "out_of_range"
+
+    return temperature, None
+
+
+def _parse_temperature_state(state: State | None) -> float | None:
+    temperature, _ = _extract_temperature_value(state)
+    return temperature
 
 
 class PIDClimate(ClimateEntity):
@@ -258,10 +275,20 @@ class PIDClimate(ClimateEntity):
         if old_state is not None and new_state is not None and old_state.state == new_state.state:
             return
 
-        temperature = _parse_temperature_state(new_state)
+        temperature, error = _extract_temperature_value(new_state)
         if temperature is None:
-            if new_state is not None:
-                _LOGGER.debug("Ignoring invalid temperature state: %s", new_state.state)
+            if error == "non_numeric":
+                _LOGGER.warning(
+                    "Non-numeric temperature state for %s: %s",
+                    self._temperature_entity_id,
+                    new_state.state if new_state is not None else None,
+                )
+            else:
+                _LOGGER.debug(
+                    "Ignoring invalid temperature state for %s: %s",
+                    self._temperature_entity_id,
+                    new_state.state if new_state is not None else None,
+                )
             return
 
         self._attr_current_temperature = temperature
@@ -289,6 +316,7 @@ class PIDClimate(ClimateEntity):
     async def async_added_to_hass(self) -> None:
         self._async_sync_current_temperature_from_state(self.hass.states.get(self._temperature_entity_id))
         self._async_subscribe_temperature_listener()
+        self.async_on_remove(self._async_unsubscribe_temperature_listener)
 
         self._unsub_entry_update_listener = self._entry.add_update_listener(
             self._async_config_entry_updated
@@ -339,7 +367,7 @@ class PIDClimate(ClimateEntity):
             [self._temperature_entity_id],
             self._async_temperature_changed,
         )
-        _LOGGER.debug(
+        _LOGGER.info(
             "Registered temperature listener for %s (%s)",
             self.entity_id,
             self._temperature_entity_id,
