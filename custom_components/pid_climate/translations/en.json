@@ -14,9 +14,32 @@
           "max_temperature": "Maximum temperature",
           "temperature_step": "Temperature step",
 
+          "hvac_auto_temperature": "Target temperature - Auto",
+          "hvac_comfort_temperature": "Target temperature - Comfort",
+          "hvac_standby_temperature": "Target temperature - Standby",
+          "hvac_economy_temperature": "Target temperature - Economy",
+          "hvac_building_protection_temperature": "Target temperature - Building protection",
+
           "pwm_period": "PWM period (minutes)",
 
           "hvac_modes": "HVAC modes and target temperatures"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "min_temperature": "Minimum temperature",
+          "max_temperature": "Maximum temperature",
+          "temperature_step": "Temperature step",
+          "pwm_period": "PWM period (minutes)",
+          "hvac_auto_temperature": "Target temperature - Auto",
+          "hvac_comfort_temperature": "Target temperature - Comfort",
+          "hvac_standby_temperature": "Target temperature - Standby",
+          "hvac_economy_temperature": "Target temperature - Economy",
+          "hvac_building_protection_temperature": "Target temperature - Building protection"
         }
       }
     }
