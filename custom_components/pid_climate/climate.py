@@ -48,9 +48,6 @@ from .const import (
 
 _LOGGER = logging.getLogger(DOMAIN)
 
-MIN_VALID_TEMPERATURE = -50.0
-MAX_VALID_TEMPERATURE = 150.0
-
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -163,14 +160,11 @@ def _extract_temperature_value(state: State | None) -> tuple[float | None, str |
 
     try:
         temperature = float(value)
-    except ValueError:
+    except (TypeError, ValueError):
         return None, "non_numeric"
 
     if not math.isfinite(temperature):
-        return None, "out_of_range"
-
-    if temperature < MIN_VALID_TEMPERATURE or temperature > MAX_VALID_TEMPERATURE:
-        return None, "out_of_range"
+        return None, "non_numeric"
 
     return temperature, None
 
@@ -214,37 +208,54 @@ class PIDClimate(ClimateEntity, RestoreEntity):
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         self._hass = hass
-        self._entry = entry
+        self._config_entry = entry
 
-        self._attr_unique_id = entry.entry_id
-        self._attr_name = entry.data.get(CONF_NAME, entry.title)
+        self._attr_unique_id = self._config_entry.entry_id
+        self._attr_name = self._config_entry.data.get(CONF_NAME, self._config_entry.title)
 
-        self._temperature_entity_id: str | None = entry.options.get(
+        self._temperature_entity_id: str | None = self._config_entry.options.get(
             CONF_TEMPERATURE_ENTITY,
-            entry.data.get(CONF_TEMPERATURE_ENTITY),
+            self._config_entry.data.get(CONF_TEMPERATURE_ENTITY),
         )
-        self._output_entity_id: str = entry.data[CONF_OUTPUT_ENTITY]
-        self._humidity_sensor_entity_id: str | None = entry.data.get(CONF_HUMIDITY_ENTITY)
+        self._output_entity_id = self._config_entry.options.get(CONF_OUTPUT_ENTITY)
+        if not self._output_entity_id:
+            self._output_entity_id = self._config_entry.data[CONF_OUTPUT_ENTITY]
+        self._humidity_sensor_entity_id: str | None = self._config_entry.options.get(
+            CONF_HUMIDITY_ENTITY,
+            self._config_entry.data.get(CONF_HUMIDITY_ENTITY),
+        )
 
-        self._preset_temperatures = _resolve_preset_temperatures(entry)
-        self._default_preset = _resolve_default_preset(entry, self._preset_temperatures)
+        self._preset_temperatures = _resolve_preset_temperatures(self._config_entry)
+        self._default_preset = _resolve_default_preset(self._config_entry, self._preset_temperatures)
         self._active_preset = self._default_preset
         self._manual_override = False
 
         self._attr_min_temp = _coerce_float(
-            entry.options.get(CONF_MIN_TEMPERATURE, entry.data.get(CONF_MIN_TEMPERATURE)),
+            self._config_entry.options.get(
+                CONF_MIN_TEMPERATURE,
+                self._config_entry.data.get(CONF_MIN_TEMPERATURE),
+            ),
             DEFAULT_MIN_TEMPERATURE,
         )
         self._attr_max_temp = _coerce_float(
-            entry.options.get(CONF_MAX_TEMPERATURE, entry.data.get(CONF_MAX_TEMPERATURE)),
+            self._config_entry.options.get(
+                CONF_MAX_TEMPERATURE,
+                self._config_entry.data.get(CONF_MAX_TEMPERATURE),
+            ),
             DEFAULT_MAX_TEMPERATURE,
         )
         self._attr_target_temperature_step = _coerce_float(
-            entry.options.get(CONF_TEMPERATURE_STEP, entry.data.get(CONF_TEMPERATURE_STEP)),
+            self._config_entry.options.get(
+                CONF_TEMPERATURE_STEP,
+                self._config_entry.data.get(CONF_TEMPERATURE_STEP),
+            ),
             DEFAULT_TEMPERATURE_STEP,
         )
         self._pwm_period_minutes = _coerce_int(
-            entry.options.get(CONF_PWM_PERIOD, entry.data.get(CONF_PWM_PERIOD)),
+            self._config_entry.options.get(
+                CONF_PWM_PERIOD,
+                self._config_entry.data.get(CONF_PWM_PERIOD),
+            ),
             DEFAULT_PWM_PERIOD,
         )
 
@@ -253,7 +264,8 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         self._attr_preset_modes = list(PRESET_NAMES)
         self._attr_preset_mode = self._active_preset
 
-        self._attr_current_temperature: float | None = None
+        self._current_temperature: float | None = None
+        self._attr_current_temperature: float | None = self._current_temperature
         self._attr_target_temperature: float = self._get_preset_temperature(self._active_preset)
         self._attr_current_humidity: float | None = None
 
@@ -335,7 +347,6 @@ class PIDClimate(ClimateEntity, RestoreEntity):
                 self._attr_target_temperature,
             )
 
-        await self._async_update_output_hook(reason="preset_change")
         self.async_write_ha_state()
 
     async def _async_apply_manual_override(self, temperature: float) -> None:
@@ -343,7 +354,6 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         self._attr_preset_mode = PRESET_MANUAL
         self._set_target_temperature(temperature, reason="manual_override")
         _LOGGER.info("Manual temperature override to %.1f", self._attr_target_temperature)
-        await self._async_update_output_hook(reason="manual_override")
         self.async_write_ha_state()
 
     async def _async_restore_state(self) -> None:
@@ -441,7 +451,6 @@ class PIDClimate(ClimateEntity, RestoreEntity):
                 self._attr_target_temperature,
             )
 
-        await self._async_update_output_hook(reason="hvac_mode_change")
         self.async_write_ha_state()
 
     @callback
@@ -449,20 +458,14 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         if self._is_removing:
             return
 
-        _LOGGER.debug(
-            "Temperature listener triggered for %s",
-            self._temperature_entity_id,
-        )
-
-        old_state: State | None = event.data.get("old_state")
         new_state: State | None = event.data.get("new_state")
-        if old_state is not None and new_state is not None and old_state.state == new_state.state:
+        if new_state is None:
             return
 
         temperature, error = _extract_temperature_value(new_state)
         if temperature is None:
             raw_state = new_state.state if new_state is not None else None
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "Invalid temperature state for %s: %s (reason=%s)",
                 self._temperature_entity_id,
                 raw_state,
@@ -470,16 +473,8 @@ class PIDClimate(ClimateEntity, RestoreEntity):
             )
             return
 
-        previous_temperature = self._attr_current_temperature
+        self._current_temperature = temperature
         self._attr_current_temperature = temperature
-        _LOGGER.debug(
-            "Temperature updated from %s to %s",
-            previous_temperature,
-            temperature,
-        )
-        self.hass.async_create_task(
-            self._async_update_output_hook(reason="temperature_change")
-        )
         self.async_write_ha_state()
 
     @callback
@@ -535,12 +530,11 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         )
         self.async_on_remove(self._async_unsubscribe_humidity_listener)
 
-        self._unsub_entry_update_listener = self._entry.add_update_listener(
+        self._unsub_entry_update_listener = self._config_entry.add_update_listener(
             self._async_config_entry_updated
         )
 
         self.async_write_ha_state()
-        await self._async_update_output_hook(reason="startup")
 
     async def async_will_remove_from_hass(self) -> None:
         self._is_removing = True
@@ -577,6 +571,7 @@ class PIDClimate(ClimateEntity, RestoreEntity):
             return False
 
         self._attr_current_temperature = temperature
+        self._current_temperature = temperature
         if log_initial:
             _LOGGER.info(
                 "Initial temperature for %s from %s: %s",
@@ -688,13 +683,15 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         if self._is_removing:
             return
 
-        temperature_entity_id = entry.options.get(
+        self._config_entry = entry
+
+        temperature_entity_id = self._config_entry.options.get(
             CONF_TEMPERATURE_ENTITY,
-            entry.data.get(CONF_TEMPERATURE_ENTITY),
+            self._config_entry.data.get(CONF_TEMPERATURE_ENTITY),
         )
-        humidity_entity_id = entry.options.get(
+        humidity_entity_id = self._config_entry.options.get(
             CONF_HUMIDITY_ENTITY,
-            entry.data.get(CONF_HUMIDITY_ENTITY),
+            self._config_entry.data.get(CONF_HUMIDITY_ENTITY),
         )
 
         if isinstance(temperature_entity_id, str) and temperature_entity_id:
@@ -732,26 +729,38 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         previous_pwm_period = self._pwm_period_minutes
         previous_active_preset_temp = self._preset_temperatures.get(self._active_preset)
 
-        self._preset_temperatures = _resolve_preset_temperatures(entry)
-        self._default_preset = _resolve_default_preset(entry, self._preset_temperatures)
+        self._preset_temperatures = _resolve_preset_temperatures(self._config_entry)
+        self._default_preset = _resolve_default_preset(self._config_entry, self._preset_temperatures)
         if self._active_preset not in self._preset_temperatures:
             self._active_preset = self._default_preset
             if not self._manual_override:
                 self._attr_preset_mode = self._active_preset
         self._attr_min_temp = _coerce_float(
-            entry.options.get(CONF_MIN_TEMPERATURE, entry.data.get(CONF_MIN_TEMPERATURE)),
+            self._config_entry.options.get(
+                CONF_MIN_TEMPERATURE,
+                self._config_entry.data.get(CONF_MIN_TEMPERATURE),
+            ),
             DEFAULT_MIN_TEMPERATURE,
         )
         self._attr_max_temp = _coerce_float(
-            entry.options.get(CONF_MAX_TEMPERATURE, entry.data.get(CONF_MAX_TEMPERATURE)),
+            self._config_entry.options.get(
+                CONF_MAX_TEMPERATURE,
+                self._config_entry.data.get(CONF_MAX_TEMPERATURE),
+            ),
             DEFAULT_MAX_TEMPERATURE,
         )
         self._attr_target_temperature_step = _coerce_float(
-            entry.options.get(CONF_TEMPERATURE_STEP, entry.data.get(CONF_TEMPERATURE_STEP)),
+            self._config_entry.options.get(
+                CONF_TEMPERATURE_STEP,
+                self._config_entry.data.get(CONF_TEMPERATURE_STEP),
+            ),
             DEFAULT_TEMPERATURE_STEP,
         )
         self._pwm_period_minutes = _coerce_int(
-            entry.options.get(CONF_PWM_PERIOD, entry.data.get(CONF_PWM_PERIOD)),
+            self._config_entry.options.get(
+                CONF_PWM_PERIOD,
+                self._config_entry.data.get(CONF_PWM_PERIOD),
+            ),
             DEFAULT_PWM_PERIOD,
         )
         if self._pwm_period_minutes != previous_pwm_period:
@@ -774,7 +783,6 @@ class PIDClimate(ClimateEntity, RestoreEntity):
             self._attr_hvac_mode = HVACMode.OFF if HVACMode.OFF in self._attr_hvac_modes else self._attr_hvac_modes[0]
 
         self.async_write_ha_state()
-        await self._async_update_output_hook(reason="config_update")
 
     async def _async_stop_pwm_task(self, *, reason: str | None = None) -> None:
         if self._pwm_task is None:
