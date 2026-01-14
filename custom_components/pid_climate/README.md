@@ -1,4 +1,4 @@
-﻿# PID Climate – Home Assistant Custom Integration
+# PID Climate – Home Assistant Custom Integration
 
 Custom **Climate** integrace pro Home Assistant umožňující řízení topení pomocí **P / PID regulace** s podporou **časového PWM**.  
 Integrace je navržena především pro **binární akční členy** (relé, termopohony, KNX výstupy).

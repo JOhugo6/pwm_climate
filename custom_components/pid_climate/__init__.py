@@ -1,4 +1,4 @@
-﻿"""PID Climate integration."""
+"""PID Climate integration."""
 from __future__ import annotations
 
 import logging
