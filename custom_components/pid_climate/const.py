@@ -20,6 +20,11 @@ CONF_MAX_TEMPERATURE = "max_temperature"
 CONF_PWM_PERIOD = "pwm_period"
 
 CONF_HVAC_MODES = "hvac_modes"
+CONF_HVAC_MODE_AUTO_TEMPERATURE = "hvac_auto_temperature"
+CONF_HVAC_MODE_COMFORT_TEMPERATURE = "hvac_comfort_temperature"
+CONF_HVAC_MODE_STANDBY_TEMPERATURE = "hvac_standby_temperature"
+CONF_HVAC_MODE_ECONOMY_TEMPERATURE = "hvac_economy_temperature"
+CONF_HVAC_MODE_BUILDING_PROTECTION_TEMPERATURE = "hvac_building_protection_temperature"
 
 # ─────────────────────────────────────────────
 # Defaults
@@ -50,4 +55,12 @@ HVAC_MODE_LABELS: dict[int, str] = {
     2: "Standby",
     3: "Economy",
     4: "Building protection",
+}
+
+HVAC_MODE_TEMPERATURE_KEYS: dict[int, str] = {
+    0: CONF_HVAC_MODE_AUTO_TEMPERATURE,
+    1: CONF_HVAC_MODE_COMFORT_TEMPERATURE,
+    2: CONF_HVAC_MODE_STANDBY_TEMPERATURE,
+    3: CONF_HVAC_MODE_ECONOMY_TEMPERATURE,
+    4: CONF_HVAC_MODE_BUILDING_PROTECTION_TEMPERATURE,
 }

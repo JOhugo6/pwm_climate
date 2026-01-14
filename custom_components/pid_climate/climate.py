@@ -37,6 +37,7 @@ from .const import (
     DEFAULT_TEMPERATURE_STEP,
     DOMAIN,
     HVAC_MODE_DEFAULT_TEMPERATURES,
+    HVAC_MODE_TEMPERATURE_KEYS,
 )
 
 _LOGGER = logging.getLogger(DOMAIN)
@@ -91,13 +92,30 @@ def _merge_hvac_mode_temperatures(
     return base
 
 
+def _apply_flat_hvac_mode_temperatures(
+    base: dict[int, float],
+    source: Mapping[str, Any] | None,
+) -> dict[int, float]:
+    if not source:
+        return base
+
+    for mode_id, key in HVAC_MODE_TEMPERATURE_KEYS.items():
+        if key not in source:
+            continue
+        try:
+            base[mode_id] = float(source[key])
+        except (TypeError, ValueError):
+            continue
+
+    return base
+
+
 def _resolve_hvac_mode_temperatures(entry: ConfigEntry) -> dict[int, float]:
     temperatures = dict(HVAC_MODE_DEFAULT_TEMPERATURES)
+    temperatures = _apply_flat_hvac_mode_temperatures(temperatures, entry.data)
     temperatures = _merge_hvac_mode_temperatures(temperatures, entry.data.get(CONF_HVAC_MODES))
-    temperatures = _merge_hvac_mode_temperatures(
-        temperatures,
-        entry.options.get(CONF_HVAC_MODES),
-    )
+    temperatures = _apply_flat_hvac_mode_temperatures(temperatures, entry.options)
+    temperatures = _merge_hvac_mode_temperatures(temperatures, entry.options.get(CONF_HVAC_MODES))
     return temperatures
 
 

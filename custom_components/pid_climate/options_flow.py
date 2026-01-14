@@ -25,6 +25,7 @@ from .const import (
     CONF_HVAC_MODES,
     HVAC_MODE_LABELS,
     HVAC_MODE_DEFAULT_TEMPERATURES,
+    HVAC_MODE_TEMPERATURE_KEYS,
 )
 
 
@@ -40,27 +41,52 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
             value = self.entry.data.get(key, default)
         return default if value is None else value
 
-    def _build_hvac_mode_defaults(self) -> dict[str, float]:
-        defaults: dict[str, float] = {
-            str(mode_id): float(temperature)
-            for mode_id, temperature in HVAC_MODE_DEFAULT_TEMPERATURES.items()
-        }
+    def _apply_flat_hvac_mode_temperatures(
+        self,
+        base: dict[int, float],
+        source: dict[str, Any] | None,
+    ) -> dict[int, float]:
+        if not isinstance(source, dict):
+            return base
 
-        for source in (self.entry.data.get(CONF_HVAC_MODES), self.entry.options.get(CONF_HVAC_MODES)):
-            if not isinstance(source, dict):
+        for mode_id, key in HVAC_MODE_TEMPERATURE_KEYS.items():
+            if key not in source:
                 continue
-            for key, value in source.items():
-                try:
-                    mode_id = int(key)
-                except (TypeError, ValueError):
-                    continue
-                if str(mode_id) not in defaults:
-                    continue
-                try:
-                    defaults[str(mode_id)] = float(value)
-                except (TypeError, ValueError):
-                    continue
+            try:
+                base[mode_id] = float(source[key])
+            except (TypeError, ValueError):
+                continue
 
+        return base
+
+    def _merge_hvac_mode_temperatures(
+        self,
+        base: dict[int, float],
+        raw: dict[Any, Any] | None,
+    ) -> dict[int, float]:
+        if not isinstance(raw, dict):
+            return base
+
+        for key, value in raw.items():
+            try:
+                mode_id = int(key)
+            except (TypeError, ValueError):
+                continue
+            if mode_id not in base:
+                continue
+            try:
+                base[mode_id] = float(value)
+            except (TypeError, ValueError):
+                continue
+
+        return base
+
+    def _build_hvac_mode_defaults(self) -> dict[int, float]:
+        defaults = dict(HVAC_MODE_DEFAULT_TEMPERATURES)
+        defaults = self._apply_flat_hvac_mode_temperatures(defaults, self.entry.data)
+        defaults = self._merge_hvac_mode_temperatures(defaults, self.entry.data.get(CONF_HVAC_MODES))
+        defaults = self._apply_flat_hvac_mode_temperatures(defaults, self.entry.options)
+        defaults = self._merge_hvac_mode_temperatures(defaults, self.entry.options.get(CONF_HVAC_MODES))
         return defaults
 
     async def async_step_init(
@@ -73,15 +99,16 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
         # ─────────────────────────────────────────────
         # HVAC mode temperature sliders
         # ─────────────────────────────────────────────
-        hvac_mode_schema: dict[Any, Any] = {}
+        hvac_mode_fields: dict[Any, Any] = {}
 
         current_hvac_modes = self._build_hvac_mode_defaults()
 
-        for mode_id, label in HVAC_MODE_LABELS.items():
-            hvac_mode_schema[
-                vol.Required(
-                    str(mode_id),
-                    default=current_hvac_modes[str(mode_id)],
+        for mode_id in HVAC_MODE_LABELS:
+            key = HVAC_MODE_TEMPERATURE_KEYS[mode_id]
+            hvac_mode_fields[
+                vol.Optional(
+                    key,
+                    default=current_hvac_modes[mode_id],
                 )
             ] = selector.NumberSelector(
                 selector.NumberSelectorConfig(
@@ -93,8 +120,7 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
                 )
             )
 
-        schema = vol.Schema(
-            {
+        schema_data = {
                 vol.Optional(
                     CONF_MIN_TEMPERATURE,
                     default=self._get_option_value(CONF_MIN_TEMPERATURE, DEFAULT_MIN_TEMPERATURE),
@@ -140,12 +166,10 @@ class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
                 ): vol.Coerce(int),
 
                 # HVAC modes → target temperatures
-                vol.Required(
-                    CONF_HVAC_MODES,
-                    default=current_hvac_modes,
-                ): vol.Schema(hvac_mode_schema),
             }
-        )
+
+        schema_data.update(hvac_mode_fields)
+        schema = vol.Schema(schema_data)
 
         return self.async_show_form(
             step_id="init",

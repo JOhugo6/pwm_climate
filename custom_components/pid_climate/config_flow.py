@@ -23,8 +23,6 @@ from .const import (
     CONF_TEMPERATURE_STEP,
     CONF_PWM_PERIOD,
 
-    CONF_HVAC_MODES,
-
     DEFAULT_MIN_TEMPERATURE,
     DEFAULT_MAX_TEMPERATURE,
     DEFAULT_TEMPERATURE_STEP,
@@ -33,6 +31,7 @@ from .const import (
 
     HVAC_MODE_LABELS,
     HVAC_MODE_DEFAULT_TEMPERATURES,
+    HVAC_MODE_TEMPERATURE_KEYS,
 )
 from .options_flow import PIDClimateOptionsFlowHandler
 
@@ -71,16 +70,24 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # ─────────────────────────────────────────────
         hvac_mode_fields: dict[Any, Any] = {}
 
-        for mode_id, label in HVAC_MODE_LABELS.items():
+        for mode_id in HVAC_MODE_LABELS:
+            key = HVAC_MODE_TEMPERATURE_KEYS[mode_id]
             hvac_mode_fields[
                 vol.Required(
-                    str(mode_id),
+                    key,
                     default=HVAC_MODE_DEFAULT_TEMPERATURES[mode_id],
                 )
-            ] = vol.Coerce(float)
+            ] = selector.NumberSelector(
+                selector.NumberSelectorConfig(
+                    min=5,
+                    max=40,
+                    step=0.5,
+                    unit_of_measurement="°C",
+                    mode=selector.NumberSelectorMode.SLIDER,
+                )
+            )
 
-        schema = vol.Schema(
-            {
+        schema_data = {
                 vol.Required(CONF_NAME): str,
 
                 vol.Required(CONF_TEMPERATURE_ENTITY):
@@ -152,9 +159,10 @@ class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 # ─────────────────────────────────────
                 # HVAC modes → target temperatures
                 # ─────────────────────────────────────
-                vol.Required(CONF_HVAC_MODES): vol.Schema(hvac_mode_fields),
             }
-        )
+
+        schema_data.update(hvac_mode_fields)
+        schema = vol.Schema(schema_data)
 
         return self.async_show_form(
             step_id="user",
