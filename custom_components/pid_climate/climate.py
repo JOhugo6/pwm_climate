@@ -131,6 +131,33 @@ def _extract_temperature_value(state: State | None) -> tuple[float | None, str |
     return temperature, None
 
 
+def _extract_humidity_value(state: State | None) -> tuple[float | None, str | None]:
+    if state is None:
+        return None, "missing"
+
+    raw = state.state
+    if raw is None:
+        return None, "missing"
+
+    value = str(raw).strip()
+    if not value:
+        return None, "missing"
+
+    lowered = value.lower()
+    if lowered in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+        return None, "invalid_state"
+
+    try:
+        humidity = float(value)
+    except ValueError:
+        return None, "non_numeric"
+
+    if not math.isfinite(humidity):
+        return None, "non_numeric"
+
+    return humidity, None
+
+
 class PIDClimate(ClimateEntity):
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_should_poll = False
@@ -186,8 +213,10 @@ class PIDClimate(ClimateEntity):
 
         self._attr_current_temperature: float | None = None
         self._attr_target_temperature: float = self._default_target_temperature(self._attr_hvac_mode)
+        self._attr_current_humidity: float | None = None
 
         self._unsub_temperature_listener: Callable[[], None] | None = None
+        self._unsub_humidity_listener: Callable[[], None] | None = None
         self._unsub_entry_update_listener: Callable[[], None] | None = None
         self._last_output_value: float | None = None
         self._is_removing = False
@@ -304,6 +333,34 @@ class PIDClimate(ClimateEntity):
         self.async_write_ha_state()
         self.hass.async_create_task(self._async_update_output_hook())
 
+    @callback
+    def _async_humidity_changed(self, event: Event) -> None:
+        if self._is_removing:
+            return
+
+        old_state: State | None = event.data.get("old_state")
+        new_state: State | None = event.data["new_state"]
+        if old_state is not None and new_state is not None and old_state.state == new_state.state:
+            return
+
+        humidity, _error = _extract_humidity_value(new_state)
+        if humidity is None:
+            _LOGGER.debug(
+                "Ignoring invalid humidity state for %s: %s",
+                self._humidity_sensor_entity_id,
+                new_state.state if new_state is not None else None,
+            )
+            return
+
+        self._attr_current_humidity = humidity
+        _LOGGER.debug(
+            "Humidity update for %s from %s: %s",
+            self.entity_id,
+            self._humidity_sensor_entity_id,
+            humidity,
+        )
+        self.async_write_ha_state()
+
     async def async_turn_off(self) -> None:
         await self.async_set_hvac_mode(HVACMode.OFF)
 
@@ -325,6 +382,15 @@ class PIDClimate(ClimateEntity):
         )
         self.async_on_remove(self._async_unsubscribe_temperature_listener)
 
+        self._async_subscribe_humidity_listener()
+        self._async_sync_current_humidity_from_state(
+            self.hass.states.get(self._humidity_sensor_entity_id)
+            if self._humidity_sensor_entity_id
+            else None,
+            log_initial=True,
+        )
+        self.async_on_remove(self._async_unsubscribe_humidity_listener)
+
         self._unsub_entry_update_listener = self._entry.add_update_listener(
             self._async_config_entry_updated
         )
@@ -335,6 +401,7 @@ class PIDClimate(ClimateEntity):
     async def async_will_remove_from_hass(self) -> None:
         self._is_removing = True
         self._async_unsubscribe_temperature_listener()
+        self._async_unsubscribe_humidity_listener()
         await self._async_stop_pwm_task(reason="remove")
 
         if self._unsub_entry_update_listener is not None:
@@ -375,6 +442,36 @@ class PIDClimate(ClimateEntity):
             )
         return True
 
+    def _async_sync_current_humidity_from_state(
+        self,
+        state: State | None,
+        *,
+        log_initial: bool = False,
+    ) -> bool:
+        if not self._humidity_sensor_entity_id:
+            return False
+
+        humidity, _error = _extract_humidity_value(state)
+        if humidity is None:
+            if log_initial:
+                raw_state = state.state if state is not None else None
+                _LOGGER.debug(
+                    "Ignoring invalid humidity state for %s: %s",
+                    self._humidity_sensor_entity_id,
+                    raw_state,
+                )
+            return False
+
+        self._attr_current_humidity = humidity
+        if log_initial:
+            _LOGGER.debug(
+                "Initial humidity for %s from %s: %s",
+                self.entity_id,
+                self._humidity_sensor_entity_id,
+                humidity,
+            )
+        return True
+
     @callback
     def _async_unsubscribe_temperature_listener(self) -> None:
         if self._unsub_temperature_listener is None:
@@ -383,6 +480,15 @@ class PIDClimate(ClimateEntity):
         self._unsub_temperature_listener()
         self._unsub_temperature_listener = None
         _LOGGER.debug("Unregistered temperature listener for %s", self.entity_id)
+
+    @callback
+    def _async_unsubscribe_humidity_listener(self) -> None:
+        if self._unsub_humidity_listener is None:
+            return
+
+        self._unsub_humidity_listener()
+        self._unsub_humidity_listener = None
+        _LOGGER.debug("Unregistered humidity listener for %s", self.entity_id)
 
     @callback
     def _async_subscribe_temperature_listener(self) -> None:
@@ -409,11 +515,37 @@ class PIDClimate(ClimateEntity):
             self._temperature_entity_id,
         )
 
+    @callback
+    def _async_subscribe_humidity_listener(self) -> None:
+        if self._is_removing:
+            return
+
+        self._async_unsubscribe_humidity_listener()
+
+        if not self._humidity_sensor_entity_id:
+            _LOGGER.debug(
+                "No humidity entity configured for %s; listener not registered",
+                self.entity_id,
+            )
+            return
+
+        self._unsub_humidity_listener = async_track_state_change_event(
+            self.hass,
+            [self._humidity_sensor_entity_id],
+            self._async_humidity_changed,
+        )
+        _LOGGER.debug(
+            "Registered humidity listener for %s (%s)",
+            self.entity_id,
+            self._humidity_sensor_entity_id,
+        )
+
     async def _async_config_entry_updated(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
         if self._is_removing:
             return
 
         temperature_entity_id = entry.data.get(CONF_TEMPERATURE_ENTITY)
+        humidity_entity_id = entry.data.get(CONF_HUMIDITY_ENTITY)
 
         if isinstance(temperature_entity_id, str) and temperature_entity_id:
             if temperature_entity_id != self._temperature_entity_id:
@@ -428,6 +560,24 @@ class PIDClimate(ClimateEntity):
                     hass.states.get(self._temperature_entity_id)
                 )
                 self._async_subscribe_temperature_listener()
+
+        if isinstance(humidity_entity_id, str) and humidity_entity_id:
+            if humidity_entity_id != self._humidity_sensor_entity_id:
+                _LOGGER.debug(
+                    "Updating humidity sensor for %s: %s -> %s",
+                    self.entity_id,
+                    self._humidity_sensor_entity_id,
+                    humidity_entity_id,
+                )
+                self._humidity_sensor_entity_id = humidity_entity_id
+                self._async_sync_current_humidity_from_state(
+                    hass.states.get(self._humidity_sensor_entity_id)
+                )
+                self._async_subscribe_humidity_listener()
+        elif self._humidity_sensor_entity_id:
+            self._humidity_sensor_entity_id = None
+            self._attr_current_humidity = None
+            self._async_unsubscribe_humidity_listener()
 
         self._knx_mode_temperatures = _resolve_hvac_mode_temperatures(entry)
         self._attr_min_temp = _coerce_float(
