@@ -493,7 +493,17 @@ class PIDClimate(ClimateEntity):
         else:
             delta = target - current
             span = output_max - output_min
-            new_value = output_min + (delta * span)
+            temperature_band = self._attr_max_temp - self._attr_min_temp
+            if not math.isfinite(temperature_band) or temperature_band <= 0:
+                temperature_band = max(self._attr_target_temperature_step, 1.0)
+
+            proportional = delta / temperature_band
+            if proportional < 0:
+                proportional = 0.0
+            elif proportional > 1:
+                proportional = 1.0
+
+            new_value = output_min + (proportional * span)
 
         if new_value < output_min:
             new_value = output_min
