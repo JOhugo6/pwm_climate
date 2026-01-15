@@ -13,6 +13,7 @@
           "min_temperature": "Minimum temperature",
           "max_temperature": "Maximum temperature",
           "temperature_step": "Temperature step",
+          "kp": "Proportional gain (Kp)",
 
           "hvac_auto_temperature": "Target temperature - Auto",
           "hvac_comfort_temperature": "Target temperature - Comfort",
@@ -35,6 +36,7 @@
           "min_temperature": "Minimum temperature",
           "max_temperature": "Maximum temperature",
           "temperature_step": "Temperature step",
+          "kp": "Proportional gain (Kp)",
           "pwm_period": "PWM period (minutes)",
           "hvac_auto_temperature": "Target temperature - Auto",
           "hvac_comfort_temperature": "Target temperature - Comfort",

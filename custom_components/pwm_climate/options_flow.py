@@ -15,11 +15,13 @@ from .const import (
     CONF_MAX_TEMPERATURE,
     CONF_TEMPERATURE_STEP,
     CONF_PWM_PERIOD,
+    CONF_KP,
 
     DEFAULT_MIN_TEMPERATURE,
     DEFAULT_MAX_TEMPERATURE,
     DEFAULT_TEMPERATURE_STEP,
     DEFAULT_PWM_PERIOD,
+    DEFAULT_KP,
 
     CONF_DEFAULT_PRESET,
     CONF_HVAC_MODES,
@@ -169,6 +171,18 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
                         step=0.1,
                         unit_of_measurement="°C",
                         mode=selector.NumberSelectorMode.SLIDER,
+                    )
+                ),
+
+                vol.Optional(
+                    CONF_KP,
+                    default=self._get_option_value(CONF_KP, DEFAULT_KP),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0.1,
+                        max=100,
+                        step=0.1,
+                        mode=selector.NumberSelectorMode.BOX,
                     )
                 ),
 

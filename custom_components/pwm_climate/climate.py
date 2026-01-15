@@ -31,15 +31,16 @@ from .const import (
     CONF_NAME,
     CONF_OUTPUT_ENTITY,
     CONF_PWM_PERIOD,
+    CONF_KP,
     CONF_TEMPERATURE_ENTITY,
     CONF_TEMPERATURE_STEP,
     DEFAULT_PRESET,
     DEFAULT_MAX_TEMPERATURE,
     DEFAULT_MIN_TEMPERATURE,
     DEFAULT_PWM_PERIOD,
+    DEFAULT_KP,
     DEFAULT_TEMPERATURE_STEP,
     DOMAIN,
-    P_GAIN,
     PRESET_DEFAULT_TEMPERATURES,
     PRESET_LABELS,
     PRESET_MANUAL,
@@ -82,23 +83,6 @@ def _coerce_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
-
-
-def _calculate_p_output(
-    current_temperature: float | None,
-    target_temperature: float,
-    p_gain: float,
-) -> tuple[float | None, float | None]:
-    if current_temperature is None:
-        return None, None
-
-    error = target_temperature - current_temperature
-    if error <= 0:
-        return 0.0, error
-
-    output = error * p_gain
-    output = max(0.0, min(100.0, output))
-    return output, error
 
 
 def _merge_preset_temperatures(
@@ -288,6 +272,13 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             ),
             DEFAULT_PWM_PERIOD,
         )
+        self._p_gain = _coerce_float(
+            self._config_entry.options.get(
+                CONF_KP,
+                self._config_entry.data.get(CONF_KP),
+            ),
+            DEFAULT_KP,
+        )
 
         self._attr_hvac_modes = self._compute_hvac_modes()
         self._attr_hvac_mode = HVACMode.OFF
@@ -313,7 +304,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._pwm_output_max: float | None = None
         self._pwm_output_mode: str | None = None
         self._duty_cycle_percent: float | None = None
-        self._p_output_percent: float | None = None
+        self._control_output_percent: float | None = None
 
         _LOGGER.debug(
             "PWMClimateController init name=%s temp_sensor=%s output=%s pwm_period_min=%s",
@@ -336,6 +327,27 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         if temperature is not None:
             return temperature
         return PRESET_DEFAULT_TEMPERATURES[0]
+
+    def _calculate_proportional_output(
+        self,
+        current_temperature: float | None,
+        target_temperature: float,
+        hvac_mode: HVACMode,
+        kp: float,
+    ) -> tuple[float | None, float | None]:
+        if hvac_mode == HVACMode.OFF:
+            error = None
+            if current_temperature is not None:
+                error = target_temperature - current_temperature
+            return 0.0, error
+
+        if current_temperature is None:
+            return None, None
+
+        error = target_temperature - current_temperature
+        output = kp * error
+        output = max(0.0, min(100.0, output))
+        return output, error
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -963,6 +975,13 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             ),
             DEFAULT_PWM_PERIOD,
         )
+        self._p_gain = _coerce_float(
+            self._config_entry.options.get(
+                CONF_KP,
+                self._config_entry.data.get(CONF_KP),
+            ),
+            DEFAULT_KP,
+        )
         if self._pwm_period_minutes != previous_pwm_period:
             await self._async_stop_pwm_task(reason="pwm_period_change")
 
@@ -1130,54 +1149,35 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         current = self._attr_current_temperature
         target = self._attr_target_temperature
 
-        if self._attr_hvac_mode == HVACMode.OFF:
-            output = 0.0
-            _LOGGER.debug(
-                "P output forced to 0%% for %s: HVAC OFF (current=%s target=%s)",
-                self.entity_id,
-                current,
-                target,
-            )
-            previous_output = self._p_output_percent
-            self._p_output_percent = float(output)
-            if previous_output is None or not math.isclose(
-                previous_output,
-                output,
-                rel_tol=0.0,
-                abs_tol=1e-6,
-            ):
-                _LOGGER.info("P output updated: %.0f %%", output)
-            return
-
-        output, error = _calculate_p_output(current, target, P_GAIN)
-
-        if output is None or error is None:
-            _LOGGER.debug(
-                "Skipping P calculation for %s: missing current temperature (current=%s target=%s)",
-                self.entity_id,
-                current,
-                target,
-            )
-            return
+        output, error = self._calculate_proportional_output(
+            current,
+            target,
+            self._attr_hvac_mode,
+            self._p_gain,
+        )
 
         _LOGGER.debug(
-            "P output computed for %s: current=%.2f target=%.2f error=%.2fC output=%.0f%%",
+            "P-control calculation for %s: current=%s target=%s error=%s kp=%s output=%s",
             self.entity_id,
             current,
             target,
             error,
+            self._p_gain,
             output,
         )
 
-        previous_output = self._p_output_percent
-        self._p_output_percent = float(output)
+        if output is None:
+            return
+
+        previous_output = self._control_output_percent
+        self._control_output_percent = float(output)
         if previous_output is None or not math.isclose(
             previous_output,
             output,
             rel_tol=0.0,
             abs_tol=1e-6,
         ):
-            _LOGGER.info("P output updated: %.0f %%", output)
+            _LOGGER.debug("P output updated: %.2f%%", output)
 
     async def _async_set_output_to_min(self) -> None:
         await self._async_set_output_value(0.0)
