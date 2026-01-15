@@ -35,6 +35,7 @@ DEFAULT_TEMPERATURE_STEP = 0.1
 DEFAULT_MIN_TEMPERATURE = 20.0
 DEFAULT_MAX_TEMPERATURE = 28.0
 DEFAULT_PWM_PERIOD = 15  # minutes
+P_GAIN = 25.0
 
 # ─────────────────────────────────────────────
 # HVAC modes – KNX DPT 20.102

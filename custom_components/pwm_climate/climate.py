@@ -39,6 +39,7 @@ from .const import (
     DEFAULT_PWM_PERIOD,
     DEFAULT_TEMPERATURE_STEP,
     DOMAIN,
+    P_GAIN,
     PRESET_DEFAULT_TEMPERATURES,
     PRESET_LABELS,
     PRESET_MANUAL,
@@ -81,6 +82,30 @@ def _coerce_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _calculate_p_output(
+    current_temperature: float | None,
+    target_temperature: float,
+    hvac_mode: HVACMode,
+    p_gain: float,
+) -> tuple[float | None, float | None]:
+    if hvac_mode == HVACMode.OFF:
+        error = None
+        if current_temperature is not None:
+            error = target_temperature - current_temperature
+        return 0.0, error
+
+    if current_temperature is None:
+        return None, None
+
+    error = target_temperature - current_temperature
+    if error <= 0:
+        return 0.0, error
+
+    output = error * p_gain
+    output = max(0.0, min(100.0, output))
+    return output, error
 
 
 def _merge_preset_temperatures(
@@ -295,6 +320,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._pwm_output_max: float | None = None
         self._pwm_output_mode: str | None = None
         self._duty_cycle_percent: float | None = None
+        self._p_output_percent: float | None = None
 
         _LOGGER.debug(
             "PWMClimateController init name=%s temp_sensor=%s output=%s pwm_period_min=%s",
@@ -533,10 +559,15 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
         if new_state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             _LOGGER.debug(
-                "Ignoring temperature state for %s: state=%s",
+                "Temperature state unavailable for %s: state=%s",
                 self._temperature_entity_id,
                 new_state.state,
             )
+            if self._current_temperature is not None:
+                self._current_temperature = None
+                self._attr_current_temperature = None
+                self.async_write_ha_state()
+                self._handle_regulation_input_change(reason="temperature_unavailable")
             return
 
         temperature, error = _extract_temperature_value(new_state)
@@ -667,6 +698,9 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
     ) -> bool:
         temperature, error = _extract_temperature_value(state)
         if temperature is None:
+            if self._current_temperature is not None:
+                self._current_temperature = None
+                self._attr_current_temperature = None
             if log_initial:
                 raw_state = state.state if state is not None else None
                 if error == "non_numeric":
@@ -884,12 +918,6 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
                     old_output_entity_id,
                     output_entity_id,
                 )
-                if old_output_entity_id:
-                    await self._async_send_output_value(
-                        old_output_entity_id,
-                        0.0,
-                        track=False,
-                    )
 
         previous_pwm_period = self._pwm_period_minutes
         previous_active_preset_temp = self._preset_temperatures.get(self._active_preset)
@@ -1083,7 +1111,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             return
 
         _LOGGER.debug(
-            "PWM output recalculation for %s (reason=%s current=%s target=%s hvac=%s)",
+            "P output recalculation for %s (reason=%s current=%s target=%s hvac=%s)",
             self.entity_id,
             reason,
             self._attr_current_temperature,
@@ -1095,78 +1123,41 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         current = self._attr_current_temperature
         target = self._attr_target_temperature
 
-        if self._attr_hvac_mode == HVACMode.OFF:
-            previous_duty = self._duty_cycle_percent
-            self._duty_cycle_percent = 0.0
-            if previous_duty is None or not math.isclose(
-                previous_duty,
-                0.0,
-                rel_tol=0.0,
-                abs_tol=1e-6,
-            ):
-                self.async_write_ha_state()
-            await self._async_apply_pwm(output_min=0.0, output_max=100.0, duty_ratio=0.0)
-            return
+        output, error = _calculate_p_output(
+            current,
+            target,
+            self._attr_hvac_mode,
+            P_GAIN,
+        )
 
-        if current is None:
+        if output is None:
             _LOGGER.debug(
-                "Output hook: missing current temperature for %s; skipping output update",
+                "Skipping P-control for %s: missing current temperature",
                 self.entity_id,
             )
-            previous_duty = self._duty_cycle_percent
-            self._duty_cycle_percent = None
-            if previous_duty is not None:
-                self.async_write_ha_state()
             return
 
-        min_temp = self._attr_min_temp
-        max_temp = self._attr_max_temp
-
-        if (
-            not math.isfinite(min_temp)
-            or not math.isfinite(max_temp)
-            or max_temp <= min_temp
-        ):
-            min_temp = DEFAULT_MIN_TEMPERATURE
-            max_temp = DEFAULT_MAX_TEMPERATURE
-
-        error = target - current
-        duty_percent: float
-        if current <= min_temp:
-            duty_percent = 100.0
-        elif current >= max_temp:
-            duty_percent = 0.0
+        if error is None:
+            _LOGGER.debug(
+                "P-control: output=%.0f%% (hvac=off)",
+                output,
+            )
         else:
-            temperature_band = max_temp - min_temp
-            if not math.isfinite(temperature_band) or temperature_band <= 0:
-                duty_percent = 0.0
-            else:
-                duty_percent = (error / temperature_band) * 100.0
-                duty_percent = max(0.0, min(100.0, duty_percent))
+            _LOGGER.debug(
+                "P-control: error=%.1f°C, output=%.0f%%",
+                error,
+                output,
+            )
 
-        previous_duty = self._duty_cycle_percent
-        self._duty_cycle_percent = duty_percent
-        if previous_duty is None or not math.isclose(
-            previous_duty,
-            duty_percent,
+        previous_output = self._p_output_percent
+        self._p_output_percent = float(output)
+        if previous_output is None or not math.isclose(
+            previous_output,
+            output,
             rel_tol=0.0,
             abs_tol=1e-6,
         ):
-            self.async_write_ha_state()
-
-        _LOGGER.debug(
-            "PWM update: current=%s target=%s error=%.2f duty=%.1f%%",
-            current,
-            target,
-            error,
-            duty_percent,
-        )
-
-        await self._async_apply_pwm(
-            output_min=0.0,
-            output_max=100.0,
-            duty_ratio=duty_percent / 100.0,
-        )
+            _LOGGER.info("P output updated: %.0f %%", output)
 
     async def _async_set_output_to_min(self) -> None:
         await self._async_set_output_value(0.0)
