@@ -87,15 +87,8 @@ def _coerce_int(value: Any, default: int) -> int:
 def _calculate_p_output(
     current_temperature: float | None,
     target_temperature: float,
-    hvac_mode: HVACMode,
     p_gain: float,
 ) -> tuple[float | None, float | None]:
-    if hvac_mode == HVACMode.OFF:
-        error = None
-        if current_temperature is not None:
-            error = target_temperature - current_temperature
-        return 0.0, error
-
     if current_temperature is None:
         return None, None
 
@@ -460,13 +453,20 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             _LOGGER.debug("Ignoring unsupported HVAC mode: %s", hvac_mode)
             return
 
-        was_off = self._attr_hvac_mode == HVACMode.OFF
-        if hvac_mode == self._attr_hvac_mode:
+        previous_mode = self._attr_hvac_mode
+        was_off = previous_mode == HVACMode.OFF
+        if hvac_mode == previous_mode:
             return
 
         self._attr_hvac_mode = hvac_mode
 
-        if hvac_mode == HVACMode.HEAT and was_off:
+        if hvac_mode == HVACMode.OFF:
+            _LOGGER.info(
+                "HVAC %s -> OFF for %s; forcing P output to 0",
+                previous_mode,
+                self.entity_id,
+            )
+        elif hvac_mode == HVACMode.HEAT and was_off:
             await self._async_stop_pwm_task(reason="hvac_off_to_heat")
             self._manual_override = False
             self._active_preset = self._default_preset
@@ -480,6 +480,13 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
                 self.entity_id,
                 self._active_preset,
                 self._attr_target_temperature,
+            )
+        else:
+            _LOGGER.info(
+                "HVAC mode changed for %s: %s -> %s",
+                self.entity_id,
+                previous_mode,
+                hvac_mode,
             )
 
         self.async_write_ha_state()
@@ -1123,31 +1130,44 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         current = self._attr_current_temperature
         target = self._attr_target_temperature
 
-        output, error = _calculate_p_output(
-            current,
-            target,
-            self._attr_hvac_mode,
-            P_GAIN,
-        )
-
-        if output is None:
+        if self._attr_hvac_mode == HVACMode.OFF:
+            output = 0.0
             _LOGGER.debug(
-                "Skipping P-control for %s: missing current temperature",
+                "P output forced to 0%% for %s: HVAC OFF (current=%s target=%s)",
                 self.entity_id,
+                current,
+                target,
+            )
+            previous_output = self._p_output_percent
+            self._p_output_percent = float(output)
+            if previous_output is None or not math.isclose(
+                previous_output,
+                output,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            ):
+                _LOGGER.info("P output updated: %.0f %%", output)
+            return
+
+        output, error = _calculate_p_output(current, target, P_GAIN)
+
+        if output is None or error is None:
+            _LOGGER.debug(
+                "Skipping P calculation for %s: missing current temperature (current=%s target=%s)",
+                self.entity_id,
+                current,
+                target,
             )
             return
 
-        if error is None:
-            _LOGGER.debug(
-                "Skipping P-control for %s: missing current temperature",
-                self.entity_id,
-            )
-        else:
-            _LOGGER.debug(
-                "P-control: error=%.1f°C, output=%.0f%%",
-                error,
-                output,
-            )
+        _LOGGER.debug(
+            "P output computed for %s: current=%.2f target=%.2f error=%.2fC output=%.0f%%",
+            self.entity_id,
+            current,
+            target,
+            error,
+            output,
+        )
 
         previous_output = self._p_output_percent
         self._p_output_percent = float(output)
