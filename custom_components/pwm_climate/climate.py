@@ -304,7 +304,8 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._pwm_output_max: float | None = None
         self._pwm_output_mode: str | None = None
         self._duty_cycle_percent: float | None = None
-        self._control_output_percent: float | None = None
+        self._p_output: float = 0.0
+        self._control_output_percent: float | None = self._p_output
 
         _LOGGER.debug(
             "PWMClimateController init name=%s temp_sensor=%s output=%s pwm_period_min=%s",
@@ -334,20 +335,17 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         target_temperature: float,
         hvac_mode: HVACMode,
         kp: float,
-    ) -> tuple[float | None, float | None]:
+    ) -> tuple[float, float | None]:
         if hvac_mode == HVACMode.OFF:
-            error = None
-            if current_temperature is not None:
-                error = target_temperature - current_temperature
-            return 0.0, error
+            return 0.0, None
 
         if current_temperature is None:
-            return None, None
+            return 0.0, None
 
         error = target_temperature - current_temperature
         output = kp * error
         output = max(0.0, min(100.0, output))
-        return output, error
+        return float(output), error
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -1166,17 +1164,10 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             output,
         )
 
-        if output is None:
-            return
-
-        previous_output = self._control_output_percent
-        self._control_output_percent = float(output)
-        if previous_output is None or not math.isclose(
-            previous_output,
-            output,
-            rel_tol=0.0,
-            abs_tol=1e-6,
-        ):
+        previous_output = self._p_output
+        self._p_output = float(output)
+        self._control_output_percent = self._p_output
+        if not math.isclose(previous_output, output, rel_tol=0.0, abs_tol=1e-6):
             _LOGGER.debug("P output updated: %.2f%%", output)
 
     async def _async_set_output_to_min(self) -> None:
