@@ -466,6 +466,18 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         old_state: State | None = event.data.get("old_state")
         new_state: State | None = event.data.get("new_state")
         if new_state is None:
+            _LOGGER.debug(
+                "Ignoring temperature update for %s: new_state is None",
+                self._temperature_entity_id,
+            )
+            return
+
+        if new_state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            _LOGGER.debug(
+                "Ignoring temperature update for %s: state=%s",
+                self._temperature_entity_id,
+                new_state.state,
+            )
             return
 
         if old_state is not None and old_state.state == new_state.state:
@@ -473,9 +485,9 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
         temperature, error = _extract_temperature_value(new_state)
         if temperature is None:
-            raw_state = new_state.state if new_state is not None else None
+            raw_state = new_state.state
             _LOGGER.debug(
-                "Invalid temperature state for %s: %s (reason=%s)",
+                "Ignoring temperature update for %s: state=%s (reason=%s)",
                 self._temperature_entity_id,
                 raw_state,
                 error,
@@ -507,8 +519,8 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
         self._current_temperature = temperature
         self._attr_current_temperature = temperature
-        _LOGGER.debug(
-            "Temperature update for %s (%s): %s -> %s",
+        _LOGGER.info(
+            "Temperature updated for %s (%s): %s -> %s",
             self.entity_id,
             self._temperature_entity_id,
             previous_display,
