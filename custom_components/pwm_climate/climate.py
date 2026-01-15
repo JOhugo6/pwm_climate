@@ -1,4 +1,4 @@
-"""Climate platform for PID Climate integration."""
+"""Climate platform for PWM Climate Controller integration."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    async_add_entities([PIDClimate(hass, entry)])
+    async_add_entities([PWMClimateController(hass, entry)])
 
 
 def _coerce_float(value: Any, default: float) -> float:
@@ -196,7 +196,7 @@ def _extract_humidity_value(state: State | None) -> tuple[float | None, str | No
     return humidity, None
 
 
-class PIDClimate(ClimateEntity, RestoreEntity):
+class PWMClimateController(ClimateEntity, RestoreEntity):
     _attr_temperature_unit = UnitOfTemperature.CELSIUS
     _attr_should_poll = False
     _attr_supported_features = (
@@ -283,7 +283,7 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         self._pwm_output_mode: str | None = None
 
         _LOGGER.debug(
-            "PIDClimate init name=%s temp_sensor=%s output=%s pwm_period_min=%s",
+            "PWMClimateController init name=%s temp_sensor=%s output=%s pwm_period_min=%s",
             self._attr_name,
             self._temperature_entity_id,
             self._output_entity_id,
@@ -943,7 +943,7 @@ class PIDClimate(ClimateEntity, RestoreEntity):
             return
 
         _LOGGER.debug(
-            "PID placeholder recalculation for %s (reason=%s current=%s target=%s hvac=%s)",
+            "PWM output recalculation for %s (reason=%s current=%s target=%s hvac=%s)",
             self.entity_id,
             reason,
             self._attr_current_temperature,
@@ -979,7 +979,7 @@ class PIDClimate(ClimateEntity, RestoreEntity):
 
         if self._attr_hvac_mode != HVACMode.OFF:
             _LOGGER.debug(
-                "PID recalculation for %s (current=%s target=%s)",
+                "PWM recalculation for %s (current=%s target=%s)",
                 self.entity_id,
                 current,
                 target,

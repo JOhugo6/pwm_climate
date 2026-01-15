@@ -1,13 +1,9 @@
-"""PID Climate integration."""
+"""PWM Climate Controller integration."""
 from __future__ import annotations
 
 import logging
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
-
-from .climate import PIDClimate
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-
 
 from .const import DOMAIN
 

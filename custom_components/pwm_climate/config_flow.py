@@ -36,18 +36,18 @@ from .const import (
     PRESET_TEMPERATURE_KEYS,
     PRESET_NAMES,
 )
-from .options_flow import PIDClimateOptionsFlowHandler
+from .options_flow import PWMClimateOptionsFlowHandler
 
 
-class PIDClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Config flow for PID Climate."""
+class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Config flow for PWM Climate Controller."""
 
     VERSION = 1
 
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> PIDClimateOptionsFlowHandler:
-        return PIDClimateOptionsFlowHandler(config_entry)
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> PWMClimateOptionsFlowHandler:
+        return PWMClimateOptionsFlowHandler(config_entry)
 
     async def async_step_user(
         self,
