@@ -1,6 +1,6 @@
 # Global constants
 
-DOMAIN = "pid_climate"
+DOMAIN = "pwm_climate"
 LOGGER_NAME = DOMAIN
 
 # ---- Config keys (ConfigEntry.data) ----

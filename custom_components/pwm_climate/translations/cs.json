@@ -2,8 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "PID termostat",
-        "description": "Vytvoření nového termostatu řízeného PID regulátorem.",
+        "title": "PWM termostat",
+        "description": "Vytvoření nového termostatu řízeného PWM regulátorem.",
         "data": {
           "name": "Název termostatu",
           "temperature_entity": "Entita teplotního senzoru",
@@ -26,7 +26,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Nastavení PID termostatu",
+        "title": "Nastavení PWM termostatu",
         "data": {
           "min_temperature": "Minimální teplota",
           "max_temperature": "Maximální teplota",
@@ -42,3 +42,4 @@
     }
   }
 }
+
