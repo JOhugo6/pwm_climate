@@ -281,6 +281,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._pwm_output_min: float | None = None
         self._pwm_output_max: float | None = None
         self._pwm_output_mode: str | None = None
+        self._duty_cycle_percent: float | None = None
 
         _LOGGER.debug(
             "PWMClimateController init name=%s temp_sensor=%s output=%s pwm_period_min=%s",
@@ -314,6 +315,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             "default_preset": self._default_preset,
             "active_preset": self._active_preset,
             "manual_override": self._manual_override,
+            "duty_cycle_percent": self._duty_cycle_percent,
         }
 
     def _set_target_temperature(self, temperature: float, *, reason: str) -> None:
@@ -348,6 +350,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             )
 
         self.async_write_ha_state()
+        await self._async_update_output(reason="preset_change")
 
     async def _async_apply_manual_override(self, temperature: float) -> None:
         self._manual_override = True
@@ -355,6 +358,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._set_target_temperature(temperature, reason="manual_override")
         _LOGGER.info("Manual temperature override to %.1f", self._attr_target_temperature)
         self.async_write_ha_state()
+        await self._async_update_output(reason="manual_override")
 
     async def _async_restore_state(self) -> None:
         last_state = await self.async_get_last_state()
@@ -452,6 +456,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             )
 
         self.async_write_ha_state()
+        await self._async_update_output(reason="hvac_mode_change")
 
     @callback
     def _async_temperature_changed(self, event: Event) -> None:
@@ -510,6 +515,9 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             temperature,
         )
         self.async_write_ha_state()
+        self.hass.async_create_task(
+            self._async_update_output(reason="temperature_change")
+        )
 
     @callback
     def _async_humidity_changed(self, event: Event) -> None:
@@ -569,6 +577,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         )
 
         self.async_write_ha_state()
+        await self._async_update_output(reason="startup")
 
     async def async_will_remove_from_hass(self) -> None:
         self._is_removing = True
@@ -760,6 +769,28 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             self._attr_current_humidity = None
             self._async_unsubscribe_humidity_listener()
 
+        output_entity_id = self._config_entry.options.get(
+            CONF_OUTPUT_ENTITY,
+            self._config_entry.data.get(CONF_OUTPUT_ENTITY),
+        )
+        if isinstance(output_entity_id, str) and output_entity_id:
+            if output_entity_id != self._output_entity_id:
+                old_output_entity_id = self._output_entity_id
+                self._output_entity_id = output_entity_id
+                self._last_output_value = None
+                _LOGGER.debug(
+                    "Updating output entity for %s: %s -> %s",
+                    self.entity_id,
+                    old_output_entity_id,
+                    output_entity_id,
+                )
+                if old_output_entity_id:
+                    await self._async_send_output_value(
+                        old_output_entity_id,
+                        0.0,
+                        track=False,
+                    )
+
         previous_pwm_period = self._pwm_period_minutes
         previous_active_preset_temp = self._preset_temperatures.get(self._active_preset)
 
@@ -817,6 +848,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             self._attr_hvac_mode = HVACMode.OFF if HVACMode.OFF in self._attr_hvac_modes else self._attr_hvac_modes[0]
 
         self.async_write_ha_state()
+        await self._async_update_output(reason="config_update")
 
     async def _async_stop_pwm_task(self, *, reason: str | None = None) -> None:
         if self._pwm_task is None:
@@ -935,8 +967,16 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             on_seconds,
             off_seconds,
         )
-        self._pwm_task = self.hass.async_create_task(self._async_pwm_loop())
+        self._pwm_task = asyncio.create_task(self._async_pwm_loop())
         self._pwm_output_mode = "pwm"
+
+    async def _async_update_output(self, *, reason: str) -> None:
+        if self._is_removing:
+            return
+
+        async with self._pwm_lock:
+            await self._async_update_output_hook(reason=reason)
+            await self._async_update_output_internal()
 
     async def _async_update_output_hook(self, *, reason: str = "state_change") -> None:
         if self._is_removing:
@@ -952,41 +992,20 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         )
 
     async def _async_update_output_internal(self) -> None:
-        output_state = self.hass.states.get(self._output_entity_id)
-        output_min = _coerce_float(output_state.attributes.get("min") if output_state else None, 0.0)
-        output_max = _coerce_float(
-            output_state.attributes.get("max") if output_state else None,
-            output_min,
-        )
-        output_step = _coerce_float(
-            output_state.attributes.get("step") if output_state else None,
-            0.0,
-        )
-
-        if not math.isfinite(output_min):
-            output_min = 0.0
-        if not math.isfinite(output_max):
-            output_max = output_min
-        if not math.isfinite(output_step):
-            output_step = 0.0
-
-        output_min = max(output_min, 0.0)
-        if output_max < output_min:
-            output_max = output_min
-
         current = self._attr_current_temperature
         target = self._attr_target_temperature
 
-        if self._attr_hvac_mode != HVACMode.OFF:
-            _LOGGER.debug(
-                "PWM recalculation for %s (current=%s target=%s)",
-                self.entity_id,
-                current,
-                target,
-            )
-
         if self._attr_hvac_mode == HVACMode.OFF:
-            await self._async_apply_pwm(output_min=output_min, output_max=output_max, duty_ratio=0.0)
+            previous_duty = self._duty_cycle_percent
+            self._duty_cycle_percent = 0.0
+            if previous_duty is None or not math.isclose(
+                previous_duty,
+                0.0,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            ):
+                self.async_write_ha_state()
+            await self._async_apply_pwm(output_min=0.0, output_max=100.0, duty_ratio=0.0)
             return
 
         if current is None:
@@ -994,77 +1013,98 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
                 "Output hook: missing current temperature for %s; skipping output update",
                 self.entity_id,
             )
+            previous_duty = self._duty_cycle_percent
+            self._duty_cycle_percent = None
+            if previous_duty is not None:
+                self.async_write_ha_state()
             return
 
-        if current >= target:
-            new_value = output_min
+        min_temp = self._attr_min_temp
+        max_temp = self._attr_max_temp
+
+        if (
+            not math.isfinite(min_temp)
+            or not math.isfinite(max_temp)
+            or max_temp <= min_temp
+        ):
+            min_temp = DEFAULT_MIN_TEMPERATURE
+            max_temp = DEFAULT_MAX_TEMPERATURE
+
+        error = target - current
+        duty_percent: float
+        if current <= min_temp:
+            duty_percent = 100.0
+        elif current >= max_temp:
+            duty_percent = 0.0
         else:
-            delta = target - current
-            span = output_max - output_min
-            temperature_band = self._attr_max_temp - self._attr_min_temp
+            temperature_band = max_temp - min_temp
             if not math.isfinite(temperature_band) or temperature_band <= 0:
-                temperature_band = max(self._attr_target_temperature_step, 1.0)
+                duty_percent = 0.0
+            else:
+                duty_percent = (error / temperature_band) * 100.0
+                duty_percent = max(0.0, min(100.0, duty_percent))
 
-            proportional = delta / temperature_band
-            if proportional < 0:
-                proportional = 0.0
-            elif proportional > 1:
-                proportional = 1.0
-
-            new_value = output_min + (proportional * span)
-
-        if new_value < output_min:
-            new_value = output_min
-        elif new_value > output_max:
-            new_value = output_max
-
-        if output_step > 0:
-            new_value = round(new_value / output_step) * output_step
-            if new_value < output_min:
-                new_value = output_min
-            elif new_value > output_max:
-                new_value = output_max
-
-        span = output_max - output_min
-        if span <= 0:
-            duty_ratio = 1.0 if new_value > 0 else 0.0
-        else:
-            duty_ratio = (new_value - output_min) / span
-
-        duty_ratio = max(0.0, min(1.0, duty_ratio))
+        previous_duty = self._duty_cycle_percent
+        self._duty_cycle_percent = duty_percent
+        if previous_duty is None or not math.isclose(
+            previous_duty,
+            duty_percent,
+            rel_tol=0.0,
+            abs_tol=1e-6,
+        ):
+            self.async_write_ha_state()
 
         _LOGGER.debug(
-            "PWM update: current=%s target=%s output=%s duty=%.1f%%",
+            "PWM update: current=%s target=%s error=%.2f duty=%.1f%%",
             current,
             target,
-            new_value,
-            duty_ratio * 100.0,
+            error,
+            duty_percent,
         )
 
         await self._async_apply_pwm(
-            output_min=output_min,
-            output_max=output_max,
-            duty_ratio=duty_ratio,
+            output_min=0.0,
+            output_max=100.0,
+            duty_ratio=duty_percent / 100.0,
         )
 
     async def _async_set_output_to_min(self) -> None:
-        output_state = self.hass.states.get(self._output_entity_id)
-        output_min = _coerce_float(output_state.attributes.get("min") if output_state else None, 0.0)
-        await self._async_set_output_value(output_min)
+        await self._async_set_output_value(0.0)
 
-    async def _async_set_output_value(self, value: float) -> None:
-        if self._last_output_value == value:
+    async def _async_send_output_value(
+        self,
+        entity_id: str | None,
+        value: float,
+        *,
+        track: bool,
+    ) -> None:
+        if not entity_id:
+            return
+        if not math.isfinite(value):
+            return
+
+        safe_value = max(0.0, min(100.0, value))
+        if track and self._last_output_value is not None and math.isclose(
+            self._last_output_value,
+            safe_value,
+            rel_tol=0.0,
+            abs_tol=1e-6,
+        ):
             return
 
         try:
             await self.hass.services.async_call(
                 "number",
                 "set_value",
-                {"entity_id": self._output_entity_id, "value": value},
+                {"entity_id": entity_id, "value": safe_value},
                 blocking=True,
             )
         except Exception:
-            _LOGGER.exception("Failed setting %s to %s", self._output_entity_id, value)
+            _LOGGER.exception("Failed setting %s to %s", entity_id, safe_value)
             return
 
-        self._last_output_value = value
+        if track:
+            self._last_output_value = safe_value
+
+    async def _async_set_output_value(self, value: float) -> None:
+        await self._async_send_output_value(self._output_entity_id, value, track=True)
