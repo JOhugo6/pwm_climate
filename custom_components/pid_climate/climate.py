@@ -458,8 +458,12 @@ class PIDClimate(ClimateEntity, RestoreEntity):
         if self._is_removing:
             return
 
+        old_state: State | None = event.data.get("old_state")
         new_state: State | None = event.data.get("new_state")
         if new_state is None:
+            return
+
+        if old_state is not None and old_state.state == new_state.state:
             return
 
         temperature, error = _extract_temperature_value(new_state)
@@ -473,8 +477,38 @@ class PIDClimate(ClimateEntity, RestoreEntity):
             )
             return
 
+        old_temperature: float | None = None
+        old_display: Any = None
+        if old_state is not None:
+            old_temperature, _old_error = _extract_temperature_value(old_state)
+            old_display = old_temperature if old_temperature is not None else old_state.state
+
+        previous_temperature = (
+            old_temperature if old_temperature is not None else self._current_temperature
+        )
+        previous_display = (
+            old_display if old_display is not None else self._current_temperature
+        )
+        if (
+            previous_temperature is not None
+            and math.isclose(
+                temperature,
+                previous_temperature,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            )
+        ):
+            return
+
         self._current_temperature = temperature
         self._attr_current_temperature = temperature
+        _LOGGER.debug(
+            "Temperature update for %s (%s): %s -> %s",
+            self.entity_id,
+            self._temperature_entity_id,
+            previous_display,
+            temperature,
+        )
         self.async_write_ha_state()
 
     @callback
