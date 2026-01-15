@@ -460,8 +460,11 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         await self._async_update_output(reason="hvac_mode_change")
 
     @callback
-    def _handle_regulation_input_change(self) -> None:
-        _LOGGER.debug("Regulation input change detected for %s", self.entity_id)
+    def _handle_regulation_input_change(self, *, reason: str) -> None:
+        if self._is_removing:
+            return
+
+        self.hass.async_create_task(self._async_update_output(reason=reason))
 
     @callback
     def _async_regulation_state_changed(self, event: Event) -> None:
@@ -512,7 +515,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             else:
                 _LOGGER.info("Target temperature changed to %.1f", new_target)
 
-        self._handle_regulation_input_change()
+        self._handle_regulation_input_change(reason="regulation_change")
 
     @callback
     def _async_temperature_changed(self, event: Event) -> None:
@@ -534,9 +537,6 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
                 self._temperature_entity_id,
                 new_state.state,
             )
-            return
-
-        if old_state is not None and old_state.state == new_state.state:
             return
 
         temperature, error = _extract_temperature_value(new_state)
@@ -583,7 +583,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             temperature,
         )
         self.async_write_ha_state()
-        self._handle_regulation_input_change()
+        self._handle_regulation_input_change(reason="temperature_change")
 
     @callback
     def _async_humidity_changed(self, event: Event) -> None:
@@ -622,11 +622,12 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         await self._async_restore_state()
-        self._async_subscribe_temperature_listener()
         self._async_sync_current_temperature_from_state(
             self.hass.states.get(self._temperature_entity_id),
             log_initial=True,
         )
+        await self._async_update_output(reason="startup")
+        self._async_subscribe_temperature_listener()
         self.async_on_remove(self._async_unsubscribe_temperature_listener)
 
         self._async_subscribe_regulation_listener()
@@ -646,7 +647,6 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         )
 
         self.async_write_ha_state()
-        await self._async_update_output(reason="startup")
 
     async def async_will_remove_from_hass(self) -> None:
         self._is_removing = True
@@ -686,7 +686,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._attr_current_temperature = temperature
         self._current_temperature = temperature
         if log_initial:
-            _LOGGER.info(
+            _LOGGER.debug(
                 "Initial temperature for %s from %s: %s",
                 self.entity_id,
                 self._temperature_entity_id,
@@ -846,10 +846,10 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
                     temperature_entity_id,
                 )
                 self._temperature_entity_id = temperature_entity_id
+                self._async_subscribe_temperature_listener()
                 self._async_sync_current_temperature_from_state(
                     hass.states.get(self._temperature_entity_id)
                 )
-                self._async_subscribe_temperature_listener()
 
         if isinstance(humidity_entity_id, str) and humidity_entity_id:
             if humidity_entity_id != self._humidity_sensor_entity_id:
