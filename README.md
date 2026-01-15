@@ -36,5 +36,5 @@ https://github.com/home-assistant/core.git
 logger:
 default: warning
 logs:
-    custom_components.knx_pid_climate: debug
+    custom_components.pwm_climate: debug
 ```

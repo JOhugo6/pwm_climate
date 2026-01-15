@@ -1,0 +1,10 @@
+{
+  "domain": "pwm_climate",
+  "name": "PWM Climate Controller",
+  "codeowners": [],
+  "dependencies": [],
+  "documentation": "https://github.com/JOhugo6/HA/custom_components/pwm_climate",
+  "requirements": [],
+  "version": "0.1.1",
+  "config_flow": true
+}

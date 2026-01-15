@@ -2,8 +2,8 @@
   "config": {
     "step": {
       "user": {
-        "title": "PID Thermostat",
-        "description": "Create a new PID-controlled thermostat.",
+        "title": "PWM Climate Controller",
+        "description": "Create a new PWM-based climate controller.",
         "data": {
           "name": "Thermostat name",
           "temperature_entity": "Temperature sensor entity",
@@ -30,7 +30,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "PID thermostat settings",
+        "title": "PWM climate controller settings",
         "data": {
           "min_temperature": "Minimum temperature",
           "max_temperature": "Maximum temperature",

@@ -1,7 +1,7 @@
 # Global constants
 
-DOMAIN = "pid_climate"
-LOGGER_NAME = DOMAIN
+DOMAIN = "pwm_climate"
+LOGGER_NAME = f"custom_components.{DOMAIN}"
 
 # ---- Config keys (ConfigEntry.data) ----
 CONF_NAME = "name"

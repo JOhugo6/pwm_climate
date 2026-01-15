@@ -10,7 +10,7 @@ from homeassistant.helpers import selector
 from .const import (
     DOMAIN,
 
-    # PID / Climate params
+    # PWM / Climate params
     CONF_MIN_TEMPERATURE,
     CONF_MAX_TEMPERATURE,
     CONF_TEMPERATURE_STEP,
@@ -31,8 +31,8 @@ from .const import (
 )
 
 
-class PIDClimateOptionsFlowHandler(config_entries.OptionsFlow):
-    """Options flow for PID Climate integration."""
+class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
+    """Options flow for PWM Climate Controller integration."""
 
     def __init__(self, entry: config_entries.ConfigEntry) -> None:
         self.entry = entry

@@ -1,17 +1,17 @@
-"""PID Climate integration."""
+"""PWM Climate Controller integration."""
 from __future__ import annotations
 
 import logging
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 
-from .climate import PIDClimate
+from .climate import PWMClimateController
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 
-from .const import DOMAIN
+from .const import DOMAIN, LOGGER_NAME
 
-_LOGGER = logging.getLogger(DOMAIN)
+_LOGGER = logging.getLogger(LOGGER_NAME)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
