@@ -1139,8 +1139,8 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
         if error is None:
             _LOGGER.debug(
-                "P-control: output=%.0f%% (hvac=off)",
-                output,
+                "Skipping P-control for %s: missing current temperature",
+                self.entity_id,
             )
         else:
             _LOGGER.debug(
