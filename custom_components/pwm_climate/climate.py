@@ -64,6 +64,18 @@ def _coerce_float(value: Any, default: float) -> float:
         return default
 
 
+def _coerce_optional_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if not math.isfinite(number):
+        return None
+
+    return number
+
+
 def _coerce_int(value: Any, default: int) -> int:
     try:
         return int(value)
@@ -270,6 +282,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._attr_current_humidity: float | None = None
 
         self._unsub_temperature_listener: Callable[[], None] | None = None
+        self._unsub_regulation_listener: Callable[[], None] | None = None
         self._unsub_humidity_listener: Callable[[], None] | None = None
         self._unsub_entry_update_listener: Callable[[], None] | None = None
         self._last_output_value: float | None = None
@@ -332,7 +345,6 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         preset: str,
         *,
         reason: str,
-        log_info: bool = True,
     ) -> None:
         if preset not in self._preset_temperatures:
             preset = self._default_preset
@@ -342,23 +354,13 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._attr_preset_mode = preset
         self._set_target_temperature(self._get_preset_temperature(preset), reason=reason)
 
-        if log_info:
-            _LOGGER.info(
-                "Preset changed to %s (target=%.1f)",
-                preset,
-                self._attr_target_temperature,
-            )
-
         self.async_write_ha_state()
-        await self._async_update_output(reason="preset_change")
 
     async def _async_apply_manual_override(self, temperature: float) -> None:
         self._manual_override = True
         self._attr_preset_mode = PRESET_MANUAL
         self._set_target_temperature(temperature, reason="manual_override")
-        _LOGGER.info("Manual temperature override to %.1f", self._attr_target_temperature)
         self.async_write_ha_state()
-        await self._async_update_output(reason="manual_override")
 
     async def _async_restore_state(self) -> None:
         last_state = await self.async_get_last_state()
@@ -425,7 +427,6 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         await self._async_apply_preset(
             preset_mode,
             reason="preset_selection",
-            log_info=True,
         )
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
@@ -459,6 +460,61 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         await self._async_update_output(reason="hvac_mode_change")
 
     @callback
+    def _handle_regulation_input_change(self) -> None:
+        _LOGGER.debug("Regulation input change detected for %s", self.entity_id)
+
+    @callback
+    def _async_regulation_state_changed(self, event: Event) -> None:
+        if self._is_removing:
+            return
+
+        old_state: State | None = event.data.get("old_state")
+        new_state: State | None = event.data.get("new_state")
+        if new_state is None:
+            _LOGGER.debug(
+                "Ignoring regulation input change for %s: new_state is None",
+                self.entity_id,
+            )
+            return
+
+        old_preset = old_state.attributes.get(ATTR_PRESET_MODE) if old_state else None
+        new_preset = new_state.attributes.get(ATTR_PRESET_MODE)
+        preset_changed = old_preset != new_preset
+
+        old_target = (
+            _coerce_optional_float(old_state.attributes.get(ATTR_TEMPERATURE))
+            if old_state
+            else None
+        )
+        new_target = _coerce_optional_float(new_state.attributes.get(ATTR_TEMPERATURE))
+        if old_target is None or new_target is None:
+            target_changed = old_target != new_target
+        else:
+            target_changed = not math.isclose(
+                new_target,
+                old_target,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            )
+
+        if not preset_changed and not target_changed:
+            return
+
+        if preset_changed:
+            if new_target is None:
+                _LOGGER.info("Preset changed to %s", new_preset)
+            else:
+                _LOGGER.info("Preset changed to %s (target=%.1f)", new_preset, new_target)
+
+        if target_changed:
+            if new_target is None:
+                _LOGGER.info("Target temperature cleared")
+            else:
+                _LOGGER.info("Target temperature changed to %.1f", new_target)
+
+        self._handle_regulation_input_change()
+
+    @callback
     def _async_temperature_changed(self, event: Event) -> None:
         if self._is_removing:
             return
@@ -467,14 +523,14 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         new_state: State | None = event.data.get("new_state")
         if new_state is None:
             _LOGGER.debug(
-                "Ignoring temperature update for %s: new_state is None",
+                "Ignoring temperature state for %s: new_state is None",
                 self._temperature_entity_id,
             )
             return
 
         if new_state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             _LOGGER.debug(
-                "Ignoring temperature update for %s: state=%s",
+                "Ignoring temperature state for %s: state=%s",
                 self._temperature_entity_id,
                 new_state.state,
             )
@@ -487,7 +543,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         if temperature is None:
             raw_state = new_state.state
             _LOGGER.debug(
-                "Ignoring temperature update for %s: state=%s (reason=%s)",
+                "Ignoring temperature state for %s: %s (reason=%s)",
                 self._temperature_entity_id,
                 raw_state,
                 error,
@@ -527,9 +583,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             temperature,
         )
         self.async_write_ha_state()
-        self.hass.async_create_task(
-            self._async_update_output(reason="temperature_change")
-        )
+        self._handle_regulation_input_change()
 
     @callback
     def _async_humidity_changed(self, event: Event) -> None:
@@ -575,6 +629,9 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         )
         self.async_on_remove(self._async_unsubscribe_temperature_listener)
 
+        self._async_subscribe_regulation_listener()
+        self.async_on_remove(self._async_unsubscribe_regulation_listener)
+
         self._async_subscribe_humidity_listener()
         self._async_sync_current_humidity_from_state(
             self.hass.states.get(self._humidity_sensor_entity_id)
@@ -594,6 +651,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
     async def async_will_remove_from_hass(self) -> None:
         self._is_removing = True
         self._async_unsubscribe_temperature_listener()
+        self._async_unsubscribe_regulation_listener()
         self._async_unsubscribe_humidity_listener()
         await self._async_stop_pwm_task(reason="remove")
 
@@ -676,6 +734,15 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         _LOGGER.debug("Unregistered temperature listener for %s", self.entity_id)
 
     @callback
+    def _async_unsubscribe_regulation_listener(self) -> None:
+        if self._unsub_regulation_listener is None:
+            return
+
+        self._unsub_regulation_listener()
+        self._unsub_regulation_listener = None
+        _LOGGER.debug("Unregistered regulation listener for %s", self.entity_id)
+
+    @callback
     def _async_unsubscribe_humidity_listener(self) -> None:
         if self._unsub_humidity_listener is None:
             return
@@ -708,6 +775,27 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             self.entity_id,
             self._temperature_entity_id,
         )
+
+    @callback
+    def _async_subscribe_regulation_listener(self) -> None:
+        if self._is_removing:
+            return
+
+        self._async_unsubscribe_regulation_listener()
+
+        if not self.entity_id:
+            _LOGGER.debug(
+                "No entity_id available for %s; regulation listener not registered",
+                self._attr_name,
+            )
+            return
+
+        self._unsub_regulation_listener = async_track_state_change_event(
+            self.hass,
+            [self.entity_id],
+            self._async_regulation_state_changed,
+        )
+        _LOGGER.debug("Registered regulation listener for %s", self.entity_id)
 
     @callback
     def _async_subscribe_humidity_listener(self) -> None:
