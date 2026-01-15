@@ -13,6 +13,7 @@ CONF_NAME = "name"
 CONF_TEMPERATURE_ENTITY = "temperature_entity"
 CONF_OUTPUT_ENTITY = "output_entity"
 CONF_HUMIDITY_ENTITY = "humidity_entity"
+CONF_KP = "kp"
 
 CONF_TEMPERATURE_STEP = "temperature_step"
 CONF_MIN_TEMPERATURE = "min_temperature"
@@ -35,7 +36,7 @@ DEFAULT_TEMPERATURE_STEP = 0.1
 DEFAULT_MIN_TEMPERATURE = 20.0
 DEFAULT_MAX_TEMPERATURE = 28.0
 DEFAULT_PWM_PERIOD = 15  # minutes
-P_GAIN = 25.0
+DEFAULT_KP = 10.0
 
 # ─────────────────────────────────────────────
 # HVAC modes – KNX DPT 20.102
