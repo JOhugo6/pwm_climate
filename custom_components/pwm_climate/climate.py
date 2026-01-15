@@ -331,17 +331,10 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
     def _calculate_proportional_output(
         self,
-        current_temperature: float | None,
+        current_temperature: float,
         target_temperature: float,
-        hvac_mode: HVACMode,
         kp: float,
-    ) -> tuple[float, float | None]:
-        if hvac_mode == HVACMode.OFF:
-            return 0.0, None
-
-        if current_temperature is None:
-            return 0.0, None
-
+    ) -> tuple[float, float]:
         error = target_temperature - current_temperature
         output = kp * error
         output = max(0.0, min(100.0, output))
@@ -357,6 +350,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             "default_preset": self._default_preset,
             "active_preset": self._active_preset,
             "manual_override": self._manual_override,
+            "control_output_percent": self._control_output_percent,
             "duty_cycle_percent": self._duty_cycle_percent,
         }
 
@@ -1146,17 +1140,27 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
     async def _async_update_output_internal(self) -> None:
         current = self._attr_current_temperature
         target = self._attr_target_temperature
-
-        output, error = self._calculate_proportional_output(
-            current,
-            target,
-            self._attr_hvac_mode,
-            self._p_gain,
-        )
+        skip_reason: str | None = None
+        if self._attr_hvac_mode == HVACMode.OFF:
+            output = 0.0
+            error: float | None = None
+            skip_reason = "hvac_off"
+        elif current is None:
+            output = 0.0
+            error = None
+            skip_reason = "missing_temperature"
+        else:
+            output, error = self._calculate_proportional_output(
+                current,
+                target,
+                self._p_gain,
+            )
 
         _LOGGER.debug(
-            "P-control calculation for %s: current=%s target=%s error=%s kp=%s output=%s",
+            "P-control %s for %s (reason=%s current=%s target=%s error=%s kp=%s output=%s)",
+            "calculation" if skip_reason is None else "skipped",
             self.entity_id,
+            skip_reason or "ok",
             current,
             target,
             error,
@@ -1169,6 +1173,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._control_output_percent = self._p_output
         if not math.isclose(previous_output, output, rel_tol=0.0, abs_tol=1e-6):
             _LOGGER.debug("P output updated: %.2f%%", output)
+            self.async_write_ha_state()
 
     async def _async_set_output_to_min(self) -> None:
         await self._async_set_output_value(0.0)
