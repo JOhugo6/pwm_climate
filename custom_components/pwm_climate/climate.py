@@ -357,7 +357,13 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         preset = self._attr_preset_mode
         if not isinstance(preset, str):
             return False
-        return preset.strip().casefold() == "off"
+        normalized = preset.strip().casefold()
+        if normalized == "off":
+            return True
+        protection = PRESET_LABELS.get(4)
+        if isinstance(protection, str) and normalized == protection.strip().casefold():
+            return True
+        return False
 
     def _get_preset_temperature(self, preset: str) -> float:
         auto_preset = PRESET_LABELS.get(0)
