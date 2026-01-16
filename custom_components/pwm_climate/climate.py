@@ -49,6 +49,14 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(DOMAIN)
+_PWM_RESTART_REASONS = {
+    "config_update",
+    "hvac_mode_change",
+    "regulation_change",
+    "startup",
+    "temperature_change",
+    "temperature_unavailable",
+}
 
 
 async def async_setup_entry(
@@ -301,7 +309,8 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._unsub_regulation_listener: Callable[[], None] | None = None
         self._unsub_humidity_listener: Callable[[], None] | None = None
         self._unsub_entry_update_listener: Callable[[], None] | None = None
-        self._last_output_value: float | None = None
+        self._last_pwm_output: float | None = None
+        self._pwm_enabled = False
         self._is_removing = False
         self._pwm_task: asyncio.Task | None = None
         self._pwm_lock = asyncio.Lock()
@@ -946,7 +955,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
                 self._output_domain, self._output_mode = self._resolve_output_mode(
                     self._output_entity_id
                 )
-                self._last_output_value = None
+                self._last_pwm_output = None
                 _LOGGER.debug(
                     "Updating output entity for %s: %s -> %s",
                     self.entity_id,
@@ -1022,12 +1031,15 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
     async def _async_stop_pwm_task(self, *, reason: str | None = None) -> None:
         if self._pwm_task is None:
+            self._pwm_enabled = False
             return
 
         if reason:
             _LOGGER.info("Stopping PWM for %s (%s)", self.entity_id, reason)
+            _LOGGER.debug("Cancelling PWM task for %s (%s)", self.entity_id, reason)
         else:
             _LOGGER.info("Stopping PWM for %s", self.entity_id)
+            _LOGGER.debug("Cancelling PWM task for %s", self.entity_id)
 
         self._pwm_task.cancel()
         try:
@@ -1040,6 +1052,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._pwm_period_seconds = None
         self._pwm_output_min = None
         self._pwm_output_max = None
+        self._pwm_enabled = False
 
     async def _async_pwm_loop(self) -> None:
         try:
@@ -1060,8 +1073,10 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
                 on_seconds = period_seconds * ratio
                 off_seconds = period_seconds - on_seconds
+                _LOGGER.debug("PWM output ON for %s", self.entity_id)
                 await self._async_set_output_value(output_max)
                 await asyncio.sleep(on_seconds)
+                _LOGGER.debug("PWM output OFF for %s", self.entity_id)
                 await self._async_set_output_value(output_min)
                 await asyncio.sleep(off_seconds)
         except asyncio.CancelledError:
@@ -1074,6 +1089,14 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             elif mode == "on":
                 _LOGGER.info("PWM output fixed ON for %s (%s)", self.entity_id, reason)
         self._pwm_output_mode = mode
+        self._pwm_enabled = False
+        _LOGGER.debug(
+            "PWM output stable %s for %s (value=%.1f reason=%s)",
+            mode,
+            self.entity_id,
+            value,
+            reason,
+        )
         await self._async_set_output_value(value)
 
     async def _async_apply_pwm(
@@ -1112,6 +1135,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             await self._async_set_stable_output(output_max, "on", "duty=100%")
             return
 
+        self._pwm_enabled = True
         same_period = False
         same_range = False
         same_ratio = False
@@ -1139,6 +1163,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._pwm_output_max = output_max
         if self._pwm_task is None:
             _LOGGER.info("Starting PWM for %s", self.entity_id)
+            _LOGGER.debug("Starting PWM cycle for %s", self.entity_id)
             _LOGGER.debug(
                 "PWM start for %s (period=%.1fs duty=%.1f%% on=%.1fs off=%.1fs)",
                 self.entity_id,
@@ -1166,9 +1191,10 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         if self._is_removing:
             return
 
+        force_pwm_restart = reason in _PWM_RESTART_REASONS
         async with self._pwm_lock:
             await self._async_update_output_hook(reason=reason)
-            await self._async_update_output_internal(force_pwm_restart=False)
+            await self._async_update_output_internal(force_pwm_restart=force_pwm_restart)
 
     async def _async_update_output_hook(self, *, reason: str = "state_change") -> None:
         if self._is_removing:
@@ -1218,6 +1244,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._p_output = float(output)
         self._control_output_percent = self._p_output
         self._duty_cycle_percent = self._p_output
+        _LOGGER.debug("Duty cycle for %s: %.2f%%", self.entity_id, self._duty_cycle_percent)
         if not math.isclose(previous_output, output, rel_tol=0.0, abs_tol=1e-6):
             _LOGGER.debug("P output updated: %.2f%%", output)
             self.async_write_ha_state()
@@ -1251,8 +1278,8 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         if self._output_mode == "binary":
             requested_on = safe_value > 0.0
             normalized_value = 100.0 if requested_on else 0.0
-            if track and self._last_output_value is not None and math.isclose(
-                self._last_output_value,
+            if track and self._last_pwm_output is not None and math.isclose(
+                self._last_pwm_output,
                 normalized_value,
                 rel_tol=0.0,
                 abs_tol=1e-6,
@@ -1276,11 +1303,11 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
                 return
 
             if track:
-                self._last_output_value = normalized_value
+                self._last_pwm_output = normalized_value
             return
 
-        if track and self._last_output_value is not None and math.isclose(
-            self._last_output_value,
+        if track and self._last_pwm_output is not None and math.isclose(
+            self._last_pwm_output,
             safe_value,
             rel_tol=0.0,
             abs_tol=1e-6,
@@ -1300,7 +1327,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             return
 
         if track:
-            self._last_output_value = safe_value
+            self._last_pwm_output = safe_value
 
     async def _async_set_output_value(self, value: float) -> None:
         await self._async_send_output_value(self._output_entity_id, value, track=True)
