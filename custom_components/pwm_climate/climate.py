@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+from datetime import timedelta
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -19,8 +20,9 @@ from homeassistant.const import (
 )
 from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_DEFAULT_PRESET,
@@ -1249,7 +1251,15 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         force_pwm_restart = reason in _PWM_RESTART_REASONS
         async with self._pwm_lock:
             await self._async_update_output_hook(reason=reason)
-            await self._async_update_output_internal(force_pwm_restart=force_pwm_restart)
+            duty_percent = await self._async_update_output_internal()
+            self._duty_cycle_percent = duty_percent
+            _LOGGER.debug("Duty cycle for %s: %.2f%%", self.entity_id, duty_percent)
+            await self._async_apply_pwm(
+                output_min=0.0,
+                output_max=100.0,
+                duty_ratio=duty_percent / 100.0,
+                force_restart=force_pwm_restart,
+            )
 
     async def _async_update_output_hook(self, *, reason: str = "state_change") -> None:
         if self._is_removing:
@@ -1264,7 +1274,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             self._attr_hvac_mode,
         )
 
-    async def _async_update_output_internal(self, *, force_pwm_restart: bool = False) -> None:
+    async def _async_update_output_internal(self) -> float:
         current = self._attr_current_temperature
         target = self._attr_target_temperature
         skip_reason: str | None = None
@@ -1302,18 +1312,10 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         previous_output = self._p_output
         self._p_output = float(output)
         self._control_output_percent = self._p_output
-        self._duty_cycle_percent = self._p_output
-        _LOGGER.debug("Duty cycle for %s: %.2f%%", self.entity_id, self._duty_cycle_percent)
         if not math.isclose(previous_output, output, rel_tol=0.0, abs_tol=1e-6):
             _LOGGER.debug("P output updated: %.2f%%", output)
             self.async_write_ha_state()
-
-        await self._async_apply_pwm(
-            output_min=0.0,
-            output_max=100.0,
-            duty_ratio=self._p_output / 100.0,
-            force_restart=force_pwm_restart,
-        )
+        return self._p_output
 
     async def _async_set_output_to_min(self) -> None:
         await self._async_set_output_value(0.0)
