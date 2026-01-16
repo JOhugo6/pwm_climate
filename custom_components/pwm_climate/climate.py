@@ -379,6 +379,8 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
     ) -> tuple[float, float]:
         error = target_temperature - current_temperature
         output = kp * error
+        if not math.isfinite(output):
+            output = 0.0
         output = max(0.0, min(100.0, output))
         return float(output), error
 
@@ -1278,17 +1280,9 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         current = self._attr_current_temperature
         target = self._attr_target_temperature
         skip_reason: str | None = None
-        if self._attr_hvac_mode == HVACMode.OFF:
-            output = 0.0
-            error: float | None = None
-            skip_reason = "hvac_off"
-        elif self._is_preset_off():
-            output = 0.0
-            error = None
-            skip_reason = "preset_off"
-        elif current is None:
-            output = 0.0
-            error = None
+        output = 0.0
+        error: float | None = None
+        if current is None:
             skip_reason = "missing_temperature"
         else:
             output, error = self._calculate_proportional_output(
@@ -1296,9 +1290,15 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
                 target,
                 self._p_gain,
             )
+            if self._attr_hvac_mode == HVACMode.OFF:
+                output = 0.0
+                skip_reason = "hvac_off"
+            elif self._is_preset_off():
+                output = 0.0
+                skip_reason = "preset_off"
 
         _LOGGER.debug(
-            "P-control %s for %s (reason=%s current=%s target=%s error=%s kp=%s output=%s)",
+            "P-control %s for %s (reason=%s current=%s target=%s error=%s kp=%s output=%.2f%%)",
             "calculation" if skip_reason is None else "skipped",
             self.entity_id,
             skip_reason or "ok",
