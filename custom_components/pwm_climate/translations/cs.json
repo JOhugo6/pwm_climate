@@ -18,7 +18,7 @@
           "hvac_standby_temperature": "Cílová teplota - Standby",
           "hvac_economy_temperature": "Cílová teplota - Ekonomický",
           "hvac_building_protection_temperature": "Cílová teplota - Ochrana budovy",
-          "pwm_period": "Délka PWM periody (minuty)",
+          "pwm_period": "Délka PWM periody (sekundy)",
           "hvac_modes": "Provozní režimy HVAC a cílové teploty"
         }
       }
@@ -33,7 +33,7 @@
           "max_temperature": "Maximální teplota",
           "temperature_step": "Teplotní krok",
           "kp": "Koeficient Kp",
-          "pwm_period": "Délka PWM periody (minuty)",
+          "pwm_period": "Délka PWM periody (sekundy)",
           "hvac_auto_temperature": "Cílová teplota - Auto",
           "hvac_comfort_temperature": "Cílová teplota - Komfort",
           "hvac_standby_temperature": "Cílová teplota - Standby",
