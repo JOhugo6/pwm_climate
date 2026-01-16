@@ -1126,12 +1126,31 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
                 if remaining <= 0.0:
                     remaining = 0.05
 
-                try:
-                    await asyncio.wait_for(self._pwm_update_event.wait(), timeout=remaining)
-                except asyncio.TimeoutError:
-                    continue
+                await self._async_wait_for_pwm_update(remaining)
         except asyncio.CancelledError:
             pass
+
+    async def _async_wait_for_pwm_update(self, delay: float) -> None:
+        if delay <= 0.0:
+            await asyncio.sleep(0)
+            return
+
+        sleep_task = asyncio.create_task(asyncio.sleep(delay))
+        update_task = asyncio.create_task(self._pwm_update_event.wait())
+        tasks = {sleep_task, update_task}
+        try:
+            await asyncio.wait(
+                tasks,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
     async def _async_set_stable_output(self, value: float, mode: str, reason: str) -> None:
         if mode != self._pwm_output_mode:
