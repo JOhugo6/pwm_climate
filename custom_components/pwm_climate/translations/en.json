@@ -21,7 +21,7 @@
           "hvac_economy_temperature": "Target temperature - Economy",
           "hvac_building_protection_temperature": "Target temperature - Building protection",
 
-          "pwm_period": "PWM period (minutes)",
+          "pwm_period": "PWM period (seconds)",
 
           "hvac_modes": "HVAC modes and target temperatures"
         }
@@ -37,7 +37,7 @@
           "max_temperature": "Maximum temperature",
           "temperature_step": "Temperature step",
           "kp": "Proportional gain (Kp)",
-          "pwm_period": "PWM period (minutes)",
+          "pwm_period": "PWM period (seconds)",
           "hvac_auto_temperature": "Target temperature - Auto",
           "hvac_comfort_temperature": "Target temperature - Comfort",
           "hvac_standby_temperature": "Target temperature - Standby",

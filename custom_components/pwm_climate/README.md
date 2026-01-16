@@ -4,14 +4,13 @@ PWM Climate Controller is a proportional PWM-based climate controller designed p
 
 ## Control Algorithm
 This integration uses proportional (P) control with PWM output.
-It does NOT implement a full PID controller.
 
 ## Features
 - Climate entity compatible with Home Assistant UI
 - Proportional control based on current vs target temperature
 - PWM output for on/off actuators (relays, thermal actuators, KNX outputs)
 - Optional humidity sensor display
-- Configurable min/max temperature, step, and PWM period
+- Configurable min/max temperature, step, and PWM period (seconds)
 - Preset temperatures per HVAC mode
 - Fully async execution
 
@@ -33,7 +32,7 @@ This integration uses Config Flow; no YAML is required.
 - Humidity sensor entity
 - Min/Max temperature
 - Temperature step
-- PWM period
+- PWM period (seconds)
 - Preset temperatures per HVAC mode
 
 ## Control Notes

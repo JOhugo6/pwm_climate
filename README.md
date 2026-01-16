@@ -4,7 +4,6 @@ PWM Climate Controller is a proportional PWM-based climate controller designed p
 
 ## Control Algorithm
 This integration uses proportional (P) control with PWM output.
-It does NOT implement a full PID controller.
 
 ## Breaking Changes
 This release renames the integration domain to `pwm_climate`.
