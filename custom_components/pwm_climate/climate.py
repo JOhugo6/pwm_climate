@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-from datetime import timedelta
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -20,7 +19,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.util import dt as dt_util
 
@@ -314,14 +313,14 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._last_pwm_output: float | None = None
         self._pwm_enabled = False
         self._is_removing = False
-        self._pwm_unsub: Callable[[], None] | None = None
+        self._pwm_task: asyncio.Task | None = None
+        self._pwm_update_event = asyncio.Event()
         self._pwm_lock = asyncio.Lock()
         self._pwm_ratio: float | None = None
         self._pwm_period_seconds: float | None = None
         self._pwm_output_min: float | None = None
         self._pwm_output_max: float | None = None
         self._pwm_output_mode: str | None = None
-        self._pwm_cycle_start: float | None = None
         self._pwm_on_seconds: float | None = None
         self._pwm_off_seconds: float | None = None
         self._pwm_phase: str | None = None
@@ -1044,74 +1043,85 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         await self._async_update_output(reason="config_update")
 
     async def _async_stop_pwm_task(self, *, reason: str | None = None) -> None:
-        if self._pwm_unsub is None:
+        if self._pwm_task is None:
             self._pwm_enabled = False
             return
 
         if reason:
             _LOGGER.info("Stopping PWM for %s (%s)", self.entity_id, reason)
-            _LOGGER.debug("Unsubscribing PWM timer for %s (%s)", self.entity_id, reason)
         else:
             _LOGGER.info("Stopping PWM for %s", self.entity_id)
-            _LOGGER.debug("Unsubscribing PWM timer for %s", self.entity_id)
 
-        self._pwm_unsub()
-        self._pwm_unsub = None
+        task = self._pwm_task
+        self._pwm_task = None
         self._pwm_ratio = None
         self._pwm_period_seconds = None
         self._pwm_output_min = None
         self._pwm_output_max = None
-        self._pwm_cycle_start = None
         self._pwm_on_seconds = None
         self._pwm_off_seconds = None
         self._pwm_phase = None
         self._pwm_enabled = False
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            _LOGGER.debug(
+                "PWM task ended with error for %s",
+                self.entity_id,
+                exc_info=True,
+            )
 
-    @callback
-    def _async_pwm_tick(self, now) -> None:
-        if self._is_removing or not self._pwm_enabled:
-            return
+    async def _async_pwm_loop(self) -> None:
+        try:
+            while self._pwm_enabled:
+                self._pwm_update_event.clear()
+                period_seconds = self._pwm_period_seconds
+                output_min = self._pwm_output_min
+                output_max = self._pwm_output_max
+                on_seconds = self._pwm_on_seconds
 
-        period_seconds = self._pwm_period_seconds
-        output_min = self._pwm_output_min
-        output_max = self._pwm_output_max
-        on_seconds = self._pwm_on_seconds
+                if (
+                    self._pwm_ratio is None
+                    or period_seconds is None
+                    or output_min is None
+                    or output_max is None
+                    or on_seconds is None
+                    or period_seconds <= 0.0
+                ):
+                    await self._pwm_update_event.wait()
+                    continue
 
-        if (
-            self._pwm_ratio is None
-            or period_seconds is None
-            or output_min is None
-            or output_max is None
-            or on_seconds is None
-        ):
-            return
+                now_ts = dt_util.utcnow().timestamp()
+                position = now_ts % period_seconds
+                desired_phase = "on" if position < on_seconds else "off"
 
-        if period_seconds <= 0.0:
-            return
+                if desired_phase != self._pwm_phase:
+                    self._pwm_phase = desired_phase
+                    if desired_phase == "on":
+                        _LOGGER.info("PWM output ON for %s", self.entity_id)
+                        value = output_max
+                    else:
+                        _LOGGER.info("PWM output OFF for %s", self.entity_id)
+                        value = output_min
+                    await self._async_set_output_value(value)
 
-        now_ts = now.timestamp()
-        if self._pwm_cycle_start is None:
-            self._pwm_cycle_start = now_ts
+                if desired_phase == "on":
+                    remaining = on_seconds - position
+                else:
+                    remaining = period_seconds - position
 
-        elapsed = now_ts - self._pwm_cycle_start
-        if elapsed < 0.0:
-            self._pwm_cycle_start = now_ts
-            elapsed = 0.0
+                if remaining <= 0.0:
+                    remaining = 0.05
 
-        position = elapsed % period_seconds
-        desired_phase = "on" if position < on_seconds else "off"
-        if desired_phase == self._pwm_phase:
-            return
-
-        self._pwm_phase = desired_phase
-        if desired_phase == "on":
-            _LOGGER.debug("PWM output ON for %s", self.entity_id)
-            value = output_max
-        else:
-            _LOGGER.debug("PWM output OFF for %s", self.entity_id)
-            value = output_min
-
-        self.hass.async_create_task(self._async_set_output_value(value))
+                try:
+                    await asyncio.wait_for(self._pwm_update_event.wait(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    continue
+        except asyncio.CancelledError:
+            pass
 
     async def _async_set_stable_output(self, value: float, mode: str, reason: str) -> None:
         if mode != self._pwm_output_mode:
@@ -1142,6 +1152,8 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         if self._output_mode is None:
             await self._async_stop_pwm_task(reason="unsupported_output")
             return
+        if self._pwm_task is not None and self._pwm_task.done():
+            self._pwm_task = None
 
         period_minutes = max(self._pwm_period_minutes, 1)
         period_seconds = float(period_minutes) * 60.0
@@ -1178,7 +1190,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         same_period = False
         same_range = False
         same_ratio = False
-        if self._pwm_unsub is not None:
+        if self._pwm_task is not None:
             same_period = self._pwm_period_seconds is not None and math.isclose(
                 self._pwm_period_seconds,
                 period_seconds,
@@ -1193,7 +1205,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             if same_period and same_range and same_ratio and not force_restart:
                 return
 
-        if self._pwm_unsub is not None and not same_ratio:
+        if self._pwm_task is not None and not same_ratio:
             _LOGGER.info(
                 "PWM duty cycle updated for %s: %.1f%%",
                 self.entity_id,
@@ -1207,12 +1219,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._pwm_on_seconds = on_seconds
         self._pwm_off_seconds = off_seconds
 
-        now = dt_util.utcnow()
-        if force_restart:
-            self._pwm_cycle_start = now.timestamp()
-            self._pwm_phase = None
-
-        if self._pwm_unsub is None:
+        if self._pwm_task is None:
             _LOGGER.info("Starting PWM for %s", self.entity_id)
             _LOGGER.debug("Starting PWM cycle for %s", self.entity_id)
             _LOGGER.debug(
@@ -1223,18 +1230,10 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
                 on_seconds,
                 off_seconds,
             )
-            self._pwm_cycle_start = now.timestamp()
             self._pwm_phase = None
-            self._pwm_unsub = async_track_time_interval(
-                self.hass,
-                self._async_pwm_tick,
-                timedelta(seconds=1),
-            )
             self._pwm_output_mode = "pwm"
-            self._async_pwm_tick(now)
-            return
-
-        if not (same_period and same_range and same_ratio):
+            self._pwm_task = self.hass.async_create_task(self._async_pwm_loop())
+        elif not (same_period and same_range and same_ratio):
             _LOGGER.debug(
                 "PWM update for %s (period=%.1fs duty=%.1f%% on=%.1fs off=%.1fs)",
                 self.entity_id,
@@ -1243,8 +1242,9 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
                 on_seconds,
                 off_seconds,
             )
+
         self._pwm_output_mode = "pwm"
-        self._async_pwm_tick(now)
+        self._pwm_update_event.set()
 
     async def _async_update_output(self, *, reason: str) -> None:
         if self._is_removing:
