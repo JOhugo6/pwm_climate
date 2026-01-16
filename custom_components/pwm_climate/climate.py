@@ -49,6 +49,7 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(DOMAIN)
+_PWM_RESTART_REASONS = {"temperature_change", "regulation_change"}
 
 
 async def async_setup_entry(
@@ -1025,9 +1026,9 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             return
 
         if reason:
-            _LOGGER.debug("Stopping PWM for %s (%s)", self.entity_id, reason)
+            _LOGGER.info("Stopping PWM for %s (%s)", self.entity_id, reason)
         else:
-            _LOGGER.debug("Stopping PWM for %s", self.entity_id)
+            _LOGGER.info("Stopping PWM for %s", self.entity_id)
 
         self._pwm_task.cancel()
         try:
@@ -1082,6 +1083,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         output_min: float,
         output_max: float,
         duty_ratio: float,
+        force_restart: bool = False,
     ) -> None:
         if self._output_mode is None:
             await self._async_stop_pwm_task(reason="unsupported_output")
@@ -1090,6 +1092,16 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         period_minutes = max(self._pwm_period_minutes, 1)
         period_seconds = float(period_minutes) * 60.0
         duty_ratio = max(0.0, min(1.0, duty_ratio))
+        on_seconds = period_seconds * duty_ratio
+        off_seconds = period_seconds - on_seconds
+        _LOGGER.debug(
+            "PWM timing for %s (period=%.1fs duty=%.1f%% on=%.1fs off=%.1fs)",
+            self.entity_id,
+            period_seconds,
+            duty_ratio * 100.0,
+            on_seconds,
+            off_seconds,
+        )
 
         if self._attr_hvac_mode == HVACMode.OFF or duty_ratio <= 0.0:
             await self._async_stop_pwm_task(reason="off_or_zero")
@@ -1113,19 +1125,19 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
                 self._pwm_ratio is not None
                 and math.isclose(self._pwm_ratio, duty_ratio, rel_tol=0.0, abs_tol=1e-6)
             )
-            if same_period and same_range and same_ratio:
+            if same_period and same_range and same_ratio and not force_restart:
                 return
 
-            await self._async_stop_pwm_task(reason="pwm_update")
+            stop_reason = "pwm_restart" if force_restart else "pwm_update"
+            await self._async_stop_pwm_task(reason=stop_reason)
 
         self._pwm_ratio = duty_ratio
         self._pwm_period_seconds = period_seconds
         self._pwm_output_min = output_min
         self._pwm_output_max = output_max
-        on_seconds = period_seconds * duty_ratio
-        off_seconds = period_seconds - on_seconds
+        _LOGGER.info("Starting PWM for %s", self.entity_id)
         _LOGGER.debug(
-            "Starting PWM for %s (period=%.1fs duty=%.1f%% on=%.1fs off=%.1fs)",
+            "PWM start for %s (period=%.1fs duty=%.1f%% on=%.1fs off=%.1fs)",
             self.entity_id,
             period_seconds,
             duty_ratio * 100.0,
@@ -1141,7 +1153,8 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
         async with self._pwm_lock:
             await self._async_update_output_hook(reason=reason)
-            await self._async_update_output_internal()
+            force_restart = reason in _PWM_RESTART_REASONS
+            await self._async_update_output_internal(force_pwm_restart=force_restart)
 
     async def _async_update_output_hook(self, *, reason: str = "state_change") -> None:
         if self._is_removing:
@@ -1156,7 +1169,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             self._attr_hvac_mode,
         )
 
-    async def _async_update_output_internal(self) -> None:
+    async def _async_update_output_internal(self, *, force_pwm_restart: bool = False) -> None:
         current = self._attr_current_temperature
         target = self._attr_target_temperature
         skip_reason: str | None = None
@@ -1199,6 +1212,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             output_min=0.0,
             output_max=100.0,
             duty_ratio=self._p_output / 100.0,
+            force_restart=force_pwm_restart,
         )
 
     async def _async_set_output_to_min(self) -> None:
