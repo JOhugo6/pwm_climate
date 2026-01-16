@@ -338,7 +338,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
     def _resolve_output_mode(self, entity_id: str | None) -> tuple[str | None, str | None]:
         domain = _get_entity_domain(entity_id)
-        if domain in ("switch", "input_boolean"):
+        if domain in ("switch", "input_boolean", "light"):
             return domain, "binary"
         if domain in ("number", "input_number"):
             return domain, "number"
@@ -1171,6 +1171,13 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
         preset_off = self._is_preset_off()
         if self._attr_hvac_mode != HVACMode.HEAT or preset_off or duty_ratio <= 0.0:
+            _LOGGER.debug(
+                "PWM stop (off mode) for %s (hvac=%s preset_off=%s duty=%.1f%%)",
+                self.entity_id,
+                self._attr_hvac_mode,
+                preset_off,
+                duty_ratio * 100.0,
+            )
             await self._async_stop_pwm_task(reason="off_or_zero")
             if self._attr_hvac_mode != HVACMode.HEAT:
                 stable_reason = "hvac_off"
@@ -1186,11 +1193,11 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             await self._async_set_stable_output(output_max, "on", "duty=100%")
             return
 
-        self._pwm_enabled = True
         same_period = False
         same_range = False
         same_ratio = False
         if self._pwm_task is not None:
+            previous_ratio = self._pwm_ratio
             same_period = self._pwm_period_seconds is not None and math.isclose(
                 self._pwm_period_seconds,
                 period_seconds,
@@ -1205,12 +1212,21 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             if same_period and same_range and same_ratio and not force_restart:
                 return
 
-        if self._pwm_task is not None and not same_ratio:
-            _LOGGER.info(
-                "PWM duty cycle updated for %s: %.1f%%",
-                self.entity_id,
-                duty_ratio * 100.0,
-            )
+            if not same_ratio:
+                previous_percent = (previous_ratio or 0.0) * 100.0
+                _LOGGER.debug(
+                    "PWM duty change for %s: %.1f%% -> %.1f%%",
+                    self.entity_id,
+                    previous_percent,
+                    duty_ratio * 100.0,
+                )
+                _LOGGER.debug("Restarting PWM cycle for %s due to duty change", self.entity_id)
+                await self._async_stop_pwm_task(reason="duty_change")
+                same_period = False
+                same_range = False
+                same_ratio = False
+
+        self._pwm_enabled = True
 
         self._pwm_ratio = duty_ratio
         self._pwm_period_seconds = period_seconds

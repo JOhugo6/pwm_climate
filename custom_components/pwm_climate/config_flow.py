@@ -106,7 +106,13 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_OUTPUT_ENTITY):
                     selector.EntitySelector(
                         selector.EntitySelectorConfig(
-                            domain="number",
+                            domain=[
+                                "number",
+                                "input_number",
+                                "switch",
+                                "input_boolean",
+                                "light",
+                            ],
                         )
                     ),
 
