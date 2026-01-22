@@ -47,6 +47,7 @@ from .const import (
     PRESET_NAMES,
     PRESET_TEMPERATURE_KEYS,
 )
+from .output_adapter import PWMOutputAdapter
 from .pwm_timer import SoftwarePWMTimer
 
 _LOGGER = logging.getLogger(DOMAIN)
@@ -92,12 +93,6 @@ def _coerce_int(value: Any, default: int) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
-
-
-def _get_entity_domain(entity_id: str | None) -> str | None:
-    if not entity_id or "." not in entity_id:
-        return None
-    return entity_id.split(".", 1)[0]
 
 
 def _merge_preset_temperatures(
@@ -249,7 +244,6 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._output_entity_id = self._config_entry.options.get(CONF_OUTPUT_ENTITY)
         if not self._output_entity_id:
             self._output_entity_id = self._config_entry.data[CONF_OUTPUT_ENTITY]
-        self._output_domain, self._output_mode = self._resolve_output_mode(self._output_entity_id)
         self._humidity_sensor_entity_id: str | None = self._config_entry.options.get(
             CONF_HUMIDITY_ENTITY,
             self._config_entry.data.get(CONF_HUMIDITY_ENTITY),
@@ -305,16 +299,21 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._attr_current_temperature: float | None = self._current_temperature
         self._attr_target_temperature: float = self._get_preset_temperature(self._active_preset)
         self._attr_current_humidity: float | None = None
+        self._output_adapter = PWMOutputAdapter(
+            self._hass,
+            entity_id=self._output_entity_id,
+            name=self._attr_name,
+            get_climate_temperature=self._get_output_temperature,
+        )
 
         self._unsub_temperature_listener: Callable[[], None] | None = None
         self._unsub_regulation_listener: Callable[[], None] | None = None
         self._unsub_humidity_listener: Callable[[], None] | None = None
         self._unsub_entry_update_listener: Callable[[], None] | None = None
-        self._last_pwm_output: float | None = None
         self._is_removing = False
         self._pwm_lock = asyncio.Lock()
         self._pwm_timer = SoftwarePWMTimer(
-            set_output=self._async_set_output_value,
+            set_output=self._output_adapter.async_set_pwm_output,
             name=self._attr_name,
             create_task=self._hass.async_create_task,
         )
@@ -329,20 +328,6 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             self._output_entity_id,
             self._pwm_period_setting_seconds,
         )
-
-    def _resolve_output_mode(self, entity_id: str | None) -> tuple[str | None, str | None]:
-        domain = _get_entity_domain(entity_id)
-        if domain in ("switch", "input_boolean", "light"):
-            return domain, "binary"
-        if domain in ("number", "input_number"):
-            return domain, "number"
-        if domain:
-            _LOGGER.warning(
-                "Unsupported output domain for %s: %s",
-                self.entity_id or self._attr_name,
-                domain,
-            )
-        return domain, None
 
     def _compute_hvac_modes(self) -> list[HVACMode]:
         return [HVACMode.OFF, HVACMode.HEAT]
@@ -369,6 +354,9 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         if temperature is not None:
             return temperature
         return PRESET_DEFAULT_TEMPERATURES[0]
+
+    def _get_output_temperature(self) -> float | None:
+        return self._attr_target_temperature
 
     def _calculate_proportional_output(
         self,
@@ -707,6 +695,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         self._pwm_timer.set_name(self.entity_id or self._attr_name)
+        self._output_adapter.set_name(self.entity_id or self._attr_name)
         await self._async_restore_state()
         self._async_sync_current_temperature_from_state(
             self.hass.states.get(self._temperature_entity_id),
@@ -966,10 +955,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             if output_entity_id != self._output_entity_id:
                 old_output_entity_id = self._output_entity_id
                 self._output_entity_id = output_entity_id
-                self._output_domain, self._output_mode = self._resolve_output_mode(
-                    self._output_entity_id
-                )
-                self._last_pwm_output = None
+                self._output_adapter.update_output_entity(self._output_entity_id)
                 _LOGGER.debug(
                     "Updating output entity for %s: %s -> %s",
                     self.entity_id,
@@ -1055,7 +1041,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         force_restart: bool = False,
         restart_reason: str | None = None,
     ) -> None:
-        if self._output_mode is None:
+        if not self._output_adapter.supports_output:
             await self._pwm_timer.stop(reason="unsupported_output")
             return
 
@@ -1163,78 +1149,3 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             self.async_write_ha_state()
         return self._p_output
 
-    async def _async_set_output_to_min(self) -> None:
-        await self._async_set_output_value(0.0)
-
-    async def _async_send_output_value(
-        self,
-        entity_id: str | None,
-        value: float,
-        *,
-        track: bool,
-    ) -> None:
-        if not entity_id:
-            return
-        if not math.isfinite(value):
-            return
-
-        if self._output_mode is None:
-            return
-
-        safe_value = max(0.0, min(100.0, value))
-        if self._output_mode == "binary":
-            requested_on = safe_value > 0.0
-            normalized_value = 100.0 if requested_on else 0.0
-            if track and self._last_pwm_output is not None and math.isclose(
-                self._last_pwm_output,
-                normalized_value,
-                rel_tol=0.0,
-                abs_tol=1e-6,
-            ):
-                return
-
-            service_domain = self._output_domain
-            if not service_domain:
-                return
-
-            service_name = "turn_on" if requested_on else "turn_off"
-            try:
-                await self.hass.services.async_call(
-                    service_domain,
-                    service_name,
-                    {"entity_id": entity_id},
-                    blocking=True,
-                )
-            except Exception:
-                _LOGGER.exception("Failed setting %s to %s", entity_id, service_name)
-                return
-
-            if track:
-                self._last_pwm_output = normalized_value
-            return
-
-        if track and self._last_pwm_output is not None and math.isclose(
-            self._last_pwm_output,
-            safe_value,
-            rel_tol=0.0,
-            abs_tol=1e-6,
-        ):
-            return
-
-        service_domain = self._output_domain or "number"
-        try:
-            await self.hass.services.async_call(
-                service_domain,
-                "set_value",
-                {"entity_id": entity_id, "value": safe_value},
-                blocking=True,
-            )
-        except Exception:
-            _LOGGER.exception("Failed setting %s to %s", entity_id, safe_value)
-            return
-
-        if track:
-            self._last_pwm_output = safe_value
-
-    async def _async_set_output_value(self, value: float) -> None:
-        await self._async_send_output_value(self._output_entity_id, value, track=True)
