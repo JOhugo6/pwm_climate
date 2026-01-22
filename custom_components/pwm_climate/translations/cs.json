@@ -8,7 +8,7 @@
           "name": "Název termostatu",
           "temperature_entity": "Entita teplotního senzoru",
           "humidity_entity": "Entita senzoru vlhkosti (volitelné)",
-          "output_entity": "Výstupní entita (procenta)",
+          "output_entity": "Výstupní entita",
           "min_temperature": "Minimální teplota",
           "max_temperature": "Maximální teplota",
           "temperature_step": "Teplotní krok",

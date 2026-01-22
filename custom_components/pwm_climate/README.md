@@ -26,7 +26,7 @@ This integration uses Config Flow; no YAML is required.
 ### Required
 - Name
 - Temperature sensor entity
-- Output entity (`number`, `switch`, or `light`)
+- Output entity (`number`, `switch`, `light`, or `climate`)
 
 ### Optional
 - Humidity sensor entity

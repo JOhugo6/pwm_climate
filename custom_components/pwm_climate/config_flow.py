@@ -112,6 +112,7 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                                 "switch",
                                 "input_boolean",
                                 "light",
+                                "climate",
                             ],
                         )
                     ),

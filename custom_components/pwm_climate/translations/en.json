@@ -8,7 +8,7 @@
           "name": "Thermostat name",
           "temperature_entity": "Temperature sensor entity",
           "humidity_entity": "Humidity sensor entity (optional)",
-          "output_entity": "Output entity (percentage)",
+          "output_entity": "Output entity",
 
           "min_temperature": "Minimum temperature",
           "max_temperature": "Maximum temperature",
