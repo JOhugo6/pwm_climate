@@ -11,12 +11,12 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class SoftwarePWMTimer:
-    """Async software PWM timer that drives ON/OFF values via a callback."""
+    """Async software PWM timer that drives PWM state and duty percent via a callback."""
 
     def __init__(
         self,
         *,
-        set_output: Callable[[float], Awaitable[None]],
+        set_output: Callable[[bool, float], Awaitable[None]],
         name: str | None = None,
         create_task: Callable[[Awaitable[None]], asyncio.Task] | None = None,
     ) -> None:
@@ -28,9 +28,8 @@ class SoftwarePWMTimer:
         self._update_event = asyncio.Event()
         self._enabled = False
         self._ratio: float | None = None
+        self._duty_percent: float | None = None
         self._period_seconds: float | None = None
-        self._output_min: float | None = None
-        self._output_max: float | None = None
         self._on_seconds: float | None = None
         self._off_seconds: float | None = None
         self._phase: str | None = None
@@ -54,9 +53,8 @@ class SoftwarePWMTimer:
         task = self._task
         self._task = None
         self._ratio = None
+        self._duty_percent = None
         self._period_seconds = None
-        self._output_min = None
-        self._output_max = None
         self._on_seconds = None
         self._off_seconds = None
         self._phase = None
@@ -75,8 +73,6 @@ class SoftwarePWMTimer:
         *,
         period_seconds: float,
         duty_ratio: float,
-        output_min: float,
-        output_max: float,
         force_restart: bool = False,
         restart_reason: str | None = None,
         off_reason: str | None = None,
@@ -88,6 +84,7 @@ class SoftwarePWMTimer:
 
         period_seconds = float(max(period_seconds, 1))
         duty_ratio = max(0.0, min(1.0, duty_ratio))
+        duty_percent = duty_ratio * 100.0
         on_seconds = period_seconds * duty_ratio
         off_seconds = period_seconds - on_seconds
         _LOGGER.debug(
@@ -101,16 +98,25 @@ class SoftwarePWMTimer:
 
         if duty_ratio <= 0.0:
             await self.stop(reason="off_or_zero")
-            await self._async_set_stable_output(output_min, "off", off_reason or "duty=0%")
+            await self._async_set_stable_output(
+                False,
+                duty_percent,
+                "off",
+                off_reason or "duty=0%",
+            )
             return
 
         if duty_ratio >= 1.0:
             await self.stop(reason="full_duty")
-            await self._async_set_stable_output(output_max, "on", on_reason or "duty=100%")
+            await self._async_set_stable_output(
+                True,
+                duty_percent,
+                "on",
+                on_reason or "duty=100%",
+            )
             return
 
         same_period = False
-        same_range = False
         same_ratio = False
         if self._task is not None:
             previous_ratio = self._ratio
@@ -120,12 +126,11 @@ class SoftwarePWMTimer:
                 rel_tol=0.0,
                 abs_tol=0.01,
             )
-            same_range = self._output_min == output_min and self._output_max == output_max
             same_ratio = (
                 self._ratio is not None
                 and math.isclose(self._ratio, duty_ratio, rel_tol=0.0, abs_tol=1e-6)
             )
-            if same_period and same_range and same_ratio and not force_restart:
+            if same_period and same_ratio and not force_restart:
                 return
 
             if not same_ratio:
@@ -146,15 +151,12 @@ class SoftwarePWMTimer:
             restart_cause = "duty_change"
         elif not same_period:
             restart_cause = "period_change"
-        elif not same_range:
-            restart_cause = "output_range_change"
 
         self._enabled = True
 
         self._ratio = duty_ratio
+        self._duty_percent = duty_percent
         self._period_seconds = period_seconds
-        self._output_min = output_min
-        self._output_max = output_max
         self._on_seconds = on_seconds
         self._off_seconds = off_seconds
 
@@ -177,7 +179,7 @@ class SoftwarePWMTimer:
             self._phase = None
             self._output_mode = "pwm"
             self._task = self._create_task(self._async_pwm_loop())
-        elif not (same_period and same_range and same_ratio):
+        elif not (same_period and same_ratio):
             _LOGGER.debug(
                 "PWM update for %s (period=%.1fs duty=%.1f%% on=%.1fs off=%.1fs)",
                 self._name,
@@ -196,16 +198,14 @@ class SoftwarePWMTimer:
             while self._enabled:
                 self._update_event.clear()
                 period_seconds = self._period_seconds
-                output_min = self._output_min
-                output_max = self._output_max
+                duty_percent = self._duty_percent
                 on_seconds = self._on_seconds
                 cycle_start = self._cycle_start
 
                 if (
                     self._ratio is None
                     or period_seconds is None
-                    or output_min is None
-                    or output_max is None
+                    or duty_percent is None
                     or on_seconds is None
                     or cycle_start is None
                     or period_seconds <= 0.0
@@ -220,12 +220,18 @@ class SoftwarePWMTimer:
                 if desired_phase != self._phase:
                     self._phase = desired_phase
                     if desired_phase == "on":
-                        _LOGGER.debug("PWM output ON for %s", self._name)
-                        value = output_max
+                        _LOGGER.debug(
+                            "PWM output ON for %s (power=%.1f%%)",
+                            self._name,
+                            duty_percent,
+                        )
                     else:
-                        _LOGGER.debug("PWM output OFF for %s", self._name)
-                        value = output_min
-                    await self._set_output(value)
+                        _LOGGER.debug(
+                            "PWM output OFF for %s (power=%.1f%%)",
+                            self._name,
+                            duty_percent,
+                        )
+                    await self._async_call_output(desired_phase == "on", duty_percent)
 
                 if desired_phase == "on":
                     remaining = on_seconds - position
@@ -258,7 +264,13 @@ class SoftwarePWMTimer:
                 except asyncio.CancelledError:
                     pass
 
-    async def _async_set_stable_output(self, value: float, mode: str, reason: str) -> None:
+    async def _async_set_stable_output(
+        self,
+        is_on: bool,
+        duty_percent: float,
+        mode: str,
+        reason: str,
+    ) -> None:
         if mode != self._output_mode:
             if mode == "off":
                 _LOGGER.info("PWM output fixed OFF for %s (%s)", self._name, reason)
@@ -269,10 +281,16 @@ class SoftwarePWMTimer:
         self._phase = None
         self._cycle_start = None
         _LOGGER.debug(
-            "PWM output stable %s for %s (value=%.1f reason=%s)",
+            "PWM output stable %s for %s (power=%.1f%% reason=%s)",
             mode,
             self._name,
-            value,
+            duty_percent,
             reason,
         )
-        await self._set_output(value)
+        await self._async_call_output(is_on, duty_percent)
+
+    async def _async_call_output(self, is_on: bool, duty_percent: float) -> None:
+        try:
+            await self._set_output(is_on, duty_percent)
+        except Exception:
+            _LOGGER.exception("PWM output callback failed for %s", self._name)
