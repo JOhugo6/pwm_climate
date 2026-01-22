@@ -10,7 +10,9 @@ from typing import Any
 from homeassistant.const import ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant
 
-_LOGGER = logging.getLogger(__name__)
+from .const import DOMAIN
+
+_LOGGER = logging.getLogger(DOMAIN)
 
 _BINARY_DOMAINS = {"switch", "input_boolean", "light"}
 _NUMBER_DOMAINS = {"number", "input_number"}
@@ -23,7 +25,7 @@ def _get_entity_domain(entity_id: str | None) -> str | None:
 
 
 class PWMOutputAdapter:
-    """Translate PWM ON/OFF into service calls for a target entity."""
+    """Translate PWM state and power into service calls for a target entity."""
 
     def __init__(
         self,
@@ -58,76 +60,25 @@ class PWMOutputAdapter:
     def supports_output(self) -> bool:
         return self._entity_id is not None and self._mode is not None
 
-    async def async_set_pwm_output(self, value: float) -> None:
-        await self.async_set_output_state(value > 0.0)
-
-    async def async_set_output_state(self, is_on: bool) -> None:
+    async def async_set_pwm_output(self, is_on: bool, power_percent: float) -> None:
         if not self._entity_id or self._mode is None:
             self._log_unsupported_once()
             return
 
+        power_percent = self._normalize_percent(power_percent)
+        if power_percent is None:
+            return
+
         if self._mode == "binary":
-            if self._last_state is not None and self._last_state == is_on:
-                return
-            service = "turn_on" if is_on else "turn_off"
-            if await self._async_call_service(
-                self._domain or "switch",
-                service,
-                {"entity_id": self._entity_id},
-            ):
-                self._last_state = is_on
-                self._last_value = None
+            await self._async_set_binary_output(is_on)
             return
 
         if self._mode == "number":
-            value = 100.0 if is_on else 0.0
-            if self._last_value is not None and math.isclose(
-                self._last_value,
-                value,
-                rel_tol=0.0,
-                abs_tol=1e-6,
-            ):
-                return
-            if await self._async_call_service(
-                self._domain or "number",
-                "set_value",
-                {"entity_id": self._entity_id, "value": value},
-            ):
-                self._last_value = value
-                self._last_state = is_on
+            await self._async_set_number_output(power_percent)
             return
 
         if self._mode == "climate":
-            if is_on:
-                temperature = self._resolve_climate_temperature()
-                if temperature is None:
-                    return
-                if self._last_value is not None and math.isclose(
-                    self._last_value,
-                    temperature,
-                    rel_tol=0.0,
-                    abs_tol=1e-6,
-                ):
-                    return
-                if await self._async_call_service(
-                    "climate",
-                    "set_temperature",
-                    {
-                        "entity_id": self._entity_id,
-                        ATTR_TEMPERATURE: temperature,
-                    },
-                ):
-                    self._last_value = temperature
-                    self._last_state = True
-            else:
-                if self._last_state is False:
-                    return
-                if await self._async_call_service(
-                    "climate",
-                    "turn_off",
-                    {"entity_id": self._entity_id},
-                ):
-                    self._last_state = False
+            await self._async_set_climate_output(is_on)
             return
 
     def _resolve_output_mode(self, entity_id: str | None) -> tuple[str | None, str | None]:
@@ -141,6 +92,76 @@ class PWMOutputAdapter:
         if domain:
             _LOGGER.warning("Unsupported output domain for %s: %s", self._name, domain)
         return domain, None
+
+    @staticmethod
+    def _normalize_percent(value: float) -> float | None:
+        try:
+            percent = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(percent):
+            return None
+        return max(0.0, min(100.0, percent))
+
+    async def _async_set_binary_output(self, is_on: bool) -> None:
+        if self._last_state is not None and self._last_state == is_on:
+            return
+        service = "turn_on" if is_on else "turn_off"
+        if await self._async_call_service(
+            self._domain or "switch",
+            service,
+            {"entity_id": self._entity_id},
+        ):
+            self._last_state = is_on
+            self._last_value = None
+
+    async def _async_set_number_output(self, percent: float) -> None:
+        if self._last_value is not None and math.isclose(
+            self._last_value,
+            percent,
+            rel_tol=0.0,
+            abs_tol=1e-6,
+        ):
+            return
+        if await self._async_call_service(
+            self._domain or "number",
+            "set_value",
+            {"entity_id": self._entity_id, "value": percent},
+        ):
+            self._last_value = percent
+            self._last_state = None
+
+    async def _async_set_climate_output(self, is_on: bool) -> None:
+        if is_on:
+            temperature = self._resolve_climate_temperature()
+            if temperature is None:
+                return
+            if self._last_value is not None and math.isclose(
+                self._last_value,
+                temperature,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            ):
+                return
+            if await self._async_call_service(
+                "climate",
+                "set_temperature",
+                {
+                    "entity_id": self._entity_id,
+                    ATTR_TEMPERATURE: temperature,
+                },
+            ):
+                self._last_value = temperature
+                self._last_state = True
+        else:
+            if self._last_state is False:
+                return
+            if await self._async_call_service(
+                "climate",
+                "turn_off",
+                {"entity_id": self._entity_id},
+            ):
+                self._last_state = False
 
     def _resolve_climate_temperature(self) -> float | None:
         if self._get_climate_temperature is None:

@@ -1035,8 +1035,6 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
     async def _async_apply_pwm(
         self,
         *,
-        output_min: float,
-        output_max: float,
         duty_ratio: float,
         force_restart: bool = False,
         restart_reason: str | None = None,
@@ -1070,8 +1068,6 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         await self._pwm_timer.apply(
             period_seconds=period_seconds,
             duty_ratio=duty_ratio,
-            output_min=output_min,
-            output_max=output_max,
             force_restart=force_restart,
             restart_reason=restart_reason,
             off_reason=off_reason,
@@ -1088,8 +1084,6 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             self._duty_cycle_percent = duty_percent
             _LOGGER.debug("Duty cycle for %s: %.2f%%", self.entity_id, duty_percent)
             await self._async_apply_pwm(
-                output_min=0.0,
-                output_max=100.0,
                 duty_ratio=duty_percent / 100.0,
                 force_restart=force_pwm_restart,
                 restart_reason=reason,
