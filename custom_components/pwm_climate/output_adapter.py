@@ -187,6 +187,22 @@ class PWMOutputAdapter:
         return float(temperature)
 
     async def _async_call_service(self, domain: str, service: str, data: dict[str, Any]) -> bool:
+        if not self._hass.services.has_service(domain, service):
+            _LOGGER.error(
+                "Service %s.%s not found while setting %s; check output entity/domain setup",
+                domain,
+                service,
+                self._entity_id,
+            )
+            return False
+        if self._entity_id and self._hass.states.get(self._entity_id) is None:
+            _LOGGER.error(
+                "Output entity %s not found while calling %s.%s",
+                self._entity_id,
+                domain,
+                service,
+            )
+            return False
         try:
             await self._hass.services.async_call(
                 domain,
