@@ -10,6 +10,7 @@ from .const import DOMAIN
 _LOGGER = logging.getLogger(DOMAIN)
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    # Store entry data and forward setup to the climate platform.
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = entry.data
 

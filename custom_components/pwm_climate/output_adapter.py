@@ -40,6 +40,7 @@ class PWMOutputAdapter:
         self._name = name or "PWM output"
         self._get_climate_temperature = get_climate_temperature
 
+        # Resolve output mode once and cache last applied values.
         self._domain, self._mode = self._resolve_output_mode(entity_id)
         self._last_state: bool | None = None
         self._last_value: float | None = None
@@ -61,6 +62,7 @@ class PWMOutputAdapter:
         return self._entity_id is not None and self._mode is not None
 
     async def async_set_pwm_output(self, is_on: bool, power_percent: float) -> None:
+        # Route PWM state to the appropriate HA service based on entity domain.
         if not self._entity_id or self._mode is None:
             self._log_unsupported_once()
             return
@@ -82,6 +84,7 @@ class PWMOutputAdapter:
             return
 
     def _resolve_output_mode(self, entity_id: str | None) -> tuple[str | None, str | None]:
+        # Map entity domain to a supported output mode.
         domain = _get_entity_domain(entity_id)
         if domain in _BINARY_DOMAINS:
             return domain, "binary"
@@ -104,6 +107,7 @@ class PWMOutputAdapter:
         return max(0.0, min(100.0, percent))
 
     async def _async_set_binary_output(self, is_on: bool) -> None:
+        # Avoid redundant service calls for binary entities.
         if self._last_state is not None and self._last_state == is_on:
             return
         service = "turn_on" if is_on else "turn_off"
@@ -116,6 +120,7 @@ class PWMOutputAdapter:
             self._last_value = None
 
     async def _async_set_number_output(self, percent: float) -> None:
+        # Avoid redundant service calls for numeric entities.
         if self._last_value is not None and math.isclose(
             self._last_value,
             percent,
@@ -132,6 +137,7 @@ class PWMOutputAdapter:
             self._last_state = None
 
     async def _async_set_climate_output(self, is_on: bool) -> None:
+        # Climate output is driven by setpoint temperature when "on".
         if is_on:
             temperature = self._resolve_climate_temperature()
             if temperature is None:

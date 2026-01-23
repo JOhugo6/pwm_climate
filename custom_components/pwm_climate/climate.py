@@ -51,6 +51,7 @@ from .output_adapter import PWMOutputAdapter
 from .pwm_timer import SoftwarePWMTimer
 
 _LOGGER = logging.getLogger(DOMAIN)
+# Reasons that require PWM cycle restart (e.g., period or target changes).
 _PWM_RESTART_REASONS = {
     "config_update",
     "hvac_mode_change",
@@ -66,10 +67,12 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
+    # Register a single climate entity per config entry.
     async_add_entities([PWMClimateController(hass, entry)])
 
 
 def _coerce_float(value: Any, default: float) -> float:
+    # Read numeric settings from config with safe fallback.
     try:
         return float(value)
     except (TypeError, ValueError):
@@ -77,6 +80,7 @@ def _coerce_float(value: Any, default: float) -> float:
 
 
 def _coerce_optional_float(value: Any) -> float | None:
+    # Parse a float, returning None for invalid or non-finite values.
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -89,6 +93,7 @@ def _coerce_optional_float(value: Any) -> float | None:
 
 
 def _coerce_int(value: Any, default: int) -> int:
+    # Read integer settings from config with safe fallback.
     try:
         return int(value)
     except (TypeError, ValueError):
@@ -99,6 +104,7 @@ def _merge_preset_temperatures(
     base: dict[str, float],
     raw: Mapping[Any, Any] | None,
 ) -> dict[str, float]:
+    # Merge preset temperatures from a mapping keyed by preset id or name.
     if not raw:
         return base
 
@@ -128,6 +134,7 @@ def _apply_flat_preset_temperatures(
     base: dict[str, float],
     source: Mapping[str, Any] | None,
 ) -> dict[str, float]:
+    # Merge preset temperatures from flat config keys.
     if not source:
         return base
 
@@ -146,6 +153,7 @@ def _apply_flat_preset_temperatures(
 
 
 def _resolve_preset_temperatures(entry: ConfigEntry) -> dict[str, float]:
+    # Start from defaults and then overlay config data/options (newer wins).
     temperatures = {
         PRESET_LABELS[preset_id]: PRESET_DEFAULT_TEMPERATURES[preset_id]
         for preset_id in PRESET_LABELS
@@ -158,6 +166,7 @@ def _resolve_preset_temperatures(entry: ConfigEntry) -> dict[str, float]:
 
 
 def _resolve_default_preset(entry: ConfigEntry, presets: Mapping[str, float]) -> str:
+    # Pick a valid default preset from options/data, then fallback to defaults.
     candidate = entry.options.get(CONF_DEFAULT_PRESET, entry.data.get(CONF_DEFAULT_PRESET))
     if isinstance(candidate, str) and candidate in presets:
         return candidate
@@ -167,6 +176,7 @@ def _resolve_default_preset(entry: ConfigEntry, presets: Mapping[str, float]) ->
 
 
 def _extract_temperature_value(state: State | None) -> tuple[float | None, str | None]:
+    # Normalize a temperature state to (float or None, error tag).
     if state is None:
         return None, "missing"
 
@@ -194,6 +204,7 @@ def _extract_temperature_value(state: State | None) -> tuple[float | None, str |
 
 
 def _extract_humidity_value(state: State | None) -> tuple[float | None, str | None]:
+    # Normalize a humidity state to (float or None, error tag).
     if state is None:
         return None, "missing"
 
@@ -237,6 +248,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._attr_unique_id = self._config_entry.entry_id
         self._attr_name = self._config_entry.data.get(CONF_NAME, self._config_entry.title)
 
+        # Options override initial entry data.
         self._temperature_entity_id: str | None = self._config_entry.options.get(
             CONF_TEMPERATURE_ENTITY,
             self._config_entry.data.get(CONF_TEMPERATURE_ENTITY),
@@ -249,11 +261,13 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             self._config_entry.data.get(CONF_HUMIDITY_ENTITY),
         )
 
+        # Resolve preset temperatures and active preset state.
         self._preset_temperatures = _resolve_preset_temperatures(self._config_entry)
         self._default_preset = _resolve_default_preset(self._config_entry, self._preset_temperatures)
         self._active_preset = self._default_preset
         self._manual_override = False
 
+        # Load limits and tuning parameters from config.
         self._attr_min_temp = _coerce_float(
             self._config_entry.options.get(
                 CONF_MIN_TEMPERATURE,
@@ -297,8 +311,10 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
         self._current_temperature: float | None = None
         self._attr_current_temperature: float | None = self._current_temperature
+        # Target temperature follows active preset unless manual override is set.
         self._attr_target_temperature: float = self._get_preset_temperature(self._active_preset)
         self._attr_current_humidity: float | None = None
+        # Output adapter translates PWM state into HA services.
         self._output_adapter = PWMOutputAdapter(
             self._hass,
             entity_id=self._output_entity_id,
@@ -312,6 +328,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._unsub_entry_update_listener: Callable[[], None] | None = None
         self._is_removing = False
         self._pwm_lock = asyncio.Lock()
+        # Software PWM timer drives on/off phases based on duty ratio.
         self._pwm_timer = SoftwarePWMTimer(
             set_output=self._output_adapter.async_set_pwm_output,
             name=self._attr_name,
@@ -333,6 +350,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         return [HVACMode.OFF, HVACMode.HEAT]
 
     def _is_preset_off(self) -> bool:
+        # Treat "off" and "building protection" as no-heat presets.
         preset = self._attr_preset_mode
         if not isinstance(preset, str):
             return False
@@ -364,6 +382,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         target_temperature: float,
         kp: float,
     ) -> tuple[float, float]:
+        # Simple P controller: output = kp * error, clamped to 0..100.
         error = target_temperature - current_temperature
         output = kp * error
         if not math.isfinite(output):
@@ -386,6 +405,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         }
 
     def _set_target_temperature(self, temperature: float, *, reason: str) -> None:
+        # Update the target setpoint and log the reason.
         self._attr_target_temperature = float(temperature)
         _LOGGER.debug(
             "Setpoint change for %s -> %.2f (reason=%s)",
@@ -400,6 +420,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         *,
         reason: str,
     ) -> None:
+        # Apply a preset and clear manual override.
         if preset not in self._preset_temperatures:
             preset = self._default_preset
 
@@ -411,12 +432,14 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self.async_write_ha_state()
 
     async def _async_apply_manual_override(self, temperature: float) -> None:
+        # Manual setpoint forces preset to manual until another preset is selected.
         self._manual_override = True
         self._attr_preset_mode = PRESET_MANUAL
         self._set_target_temperature(temperature, reason="manual_override")
         self.async_write_ha_state()
 
     async def _async_restore_state(self) -> None:
+        # Restore last HVAC mode, presets, and setpoint if available.
         last_state = await self.async_get_last_state()
         if last_state is None:
             return
@@ -467,6 +490,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
                 )
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
+        # User setpoint becomes a manual override.
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
@@ -474,6 +498,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         await self._async_apply_manual_override(float(temperature))
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
+        # Switch to a specific preset and update target temperature.
         if preset_mode not in self._attr_preset_modes:
             _LOGGER.debug("Ignoring unknown preset %s", preset_mode)
             return
@@ -484,6 +509,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         )
 
     async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        # Update HVAC mode and restart PWM if needed.
         if hvac_mode not in self._attr_hvac_modes:
             _LOGGER.debug("Ignoring unsupported HVAC mode: %s", hvac_mode)
             return
@@ -529,6 +555,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
     @callback
     def _handle_regulation_input_change(self, *, reason: str) -> None:
+        # Schedule recalculation of PWM output.
         if self._is_removing:
             return
 
@@ -536,6 +563,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
     @callback
     def _async_regulation_state_changed(self, event: Event) -> None:
+        # React to changes on our own climate entity (preset/target adjustments).
         if self._is_removing:
             return
 
@@ -587,6 +615,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
     @callback
     def _async_temperature_changed(self, event: Event) -> None:
+        # Update current temperature and recompute output if sensor changes.
         if self._is_removing:
             return
 
@@ -660,6 +689,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
     @callback
     def _async_humidity_changed(self, event: Event) -> None:
+        # Update humidity attribute when sensor changes.
         if self._is_removing:
             return
 
@@ -693,6 +723,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         await self.async_set_hvac_mode(HVACMode.HEAT)
 
     async def async_added_to_hass(self) -> None:
+        # Restore state, sync sensors, start PWM, and register listeners.
         await super().async_added_to_hass()
         self._pwm_timer.set_name(self.entity_id or self._attr_name)
         self._output_adapter.set_name(self.entity_id or self._attr_name)
@@ -740,6 +771,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         *,
         log_initial: bool = False,
     ) -> bool:
+        # Read current temperature from a HA state object.
         temperature, error = _extract_temperature_value(state)
         if temperature is None:
             if self._current_temperature is not None:
@@ -778,6 +810,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         *,
         log_initial: bool = False,
     ) -> bool:
+        # Read current humidity from a HA state object.
         if not self._humidity_sensor_entity_id:
             return False
 
@@ -831,6 +864,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
     @callback
     def _async_subscribe_temperature_listener(self) -> None:
+        # (Re)register listener for temperature sensor changes.
         if self._is_removing:
             return
 
@@ -856,6 +890,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
     @callback
     def _async_subscribe_regulation_listener(self) -> None:
+        # (Re)register listener for self state changes.
         if self._is_removing:
             return
 
@@ -877,6 +912,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
     @callback
     def _async_subscribe_humidity_listener(self) -> None:
+        # (Re)register listener for humidity sensor changes.
         if self._is_removing:
             return
 
@@ -901,6 +937,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         )
 
     async def _async_config_entry_updated(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+        # Refresh config values and restart PWM if timing changed.
         if self._is_removing:
             return
 
@@ -1039,6 +1076,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         force_restart: bool = False,
         restart_reason: str | None = None,
     ) -> None:
+        # Enforce HVAC/preset off rules and apply PWM timing.
         if not self._output_adapter.supports_output:
             await self._pwm_timer.stop(reason="unsupported_output")
             return
@@ -1074,6 +1112,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         )
 
     async def _async_update_output(self, *, reason: str) -> None:
+        # Serialize output updates so PWM duty changes stay consistent.
         if self._is_removing:
             return
 
@@ -1103,6 +1142,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         )
 
     async def _async_update_output_internal(self) -> float:
+        # Compute P-control output and update entity state if it changed.
         current = self._attr_current_temperature
         target = self._attr_target_temperature
         skip_reason: str | None = None

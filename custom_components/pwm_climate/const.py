@@ -42,6 +42,7 @@ DEFAULT_KP = 10.0
 # HVAC modes – KNX DPT 20.102
 # ─────────────────────────────────────────────
 # key = KNX value
+# The dicts below map preset ids to defaults and labels.
 # value = default target temperature (°C)
 
 PRESET_DEFAULT_TEMPERATURES: dict[int, float] = {

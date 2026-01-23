@@ -78,6 +78,7 @@ class SoftwarePWMTimer:
         off_reason: str | None = None,
         on_reason: str | None = None,
     ) -> None:
+        # Normalize inputs and short-circuit for fully off/on duty cycles.
         if self._task is not None and self._task.done():
             self._task = None
             self._enabled = False
@@ -161,6 +162,7 @@ class SoftwarePWMTimer:
         self._off_seconds = off_seconds
 
         if restart_cause is not None:
+            # Reset cycle start so the new duty cycle takes effect immediately.
             self._cycle_start = asyncio.get_running_loop().time()
             self._phase = None
             _LOGGER.debug("Restarting PWM cycle for %s (reason=%s)", self._name, restart_cause)
@@ -213,6 +215,7 @@ class SoftwarePWMTimer:
                     await self._update_event.wait()
                     continue
 
+                # Determine whether we are currently in the on or off phase.
                 now = loop.time()
                 position = (max(0.0, now - cycle_start)) % period_seconds
                 desired_phase = "on" if position < on_seconds else "off"
@@ -233,6 +236,7 @@ class SoftwarePWMTimer:
                         )
                     await self._async_call_output(desired_phase == "on", duty_percent)
 
+                # Wait until the next phase boundary or an update request.
                 if desired_phase == "on":
                     remaining = on_seconds - position
                 else:
@@ -246,6 +250,7 @@ class SoftwarePWMTimer:
             pass
 
     async def _async_wait_for_update(self, delay: float) -> None:
+        # Sleep until delay elapses or configuration changes.
         if delay <= 0.0:
             await asyncio.sleep(0)
             return
@@ -271,6 +276,7 @@ class SoftwarePWMTimer:
         mode: str,
         reason: str,
     ) -> None:
+        # Switch to a fixed output (no PWM loop).
         if mode != self._output_mode:
             if mode == "off":
                 _LOGGER.info("PWM output fixed OFF for %s (%s)", self._name, reason)

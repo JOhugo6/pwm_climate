@@ -40,6 +40,7 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
         self.entry = entry
 
     def _get_option_value(self, key: str, default: Any) -> Any:
+        # Prefer options over initial entry data for current defaults.
         value = self.entry.options.get(key)
         if value is None:
             value = self.entry.data.get(key, default)
@@ -86,6 +87,7 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
         return base
 
     def _build_preset_defaults(self) -> dict[int, float]:
+        # Start from defaults and apply stored values from data/options.
         defaults = dict(PRESET_DEFAULT_TEMPERATURES)
         defaults = self._apply_flat_preset_temperatures(defaults, self.entry.data)
         defaults = self._merge_preset_temperatures(defaults, self.entry.data.get(CONF_HVAC_MODES))
@@ -103,6 +105,7 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
         # ─────────────────────────────────────────────
         # HVAC mode temperature sliders
         # ─────────────────────────────────────────────
+        # Build preset temperature fields for the options form.
         preset_fields: dict[Any, Any] = {}
 
         current_presets = self._build_preset_defaults()
@@ -124,6 +127,7 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
                 )
             )
 
+        # General tuning and limit options.
         schema_data = {
                 vol.Optional(
                     CONF_DEFAULT_PRESET,
