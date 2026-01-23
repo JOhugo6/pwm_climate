@@ -20,10 +20,13 @@ class SoftwarePWMTimer:
         name: str | None = None,
         create_task: Callable[[Awaitable[None]], asyncio.Task] | None = None,
     ) -> None:
+        # External callback used to drive the actual output entity.
         self._set_output = set_output
+        # Allow injection of task factory for easier testing.
         self._create_task = create_task or asyncio.create_task
         self._name = name or "PWM"
 
+        # Internal state for PWM task and timing.
         self._task: asyncio.Task | None = None
         self._update_event = asyncio.Event()
         self._enabled = False
@@ -37,10 +40,12 @@ class SoftwarePWMTimer:
         self._output_mode: str | None = None
 
     def set_name(self, name: str | None) -> None:
+        # Update friendly name used in logs.
         if name:
             self._name = name
 
     async def stop(self, *, reason: str | None = None) -> None:
+        # Cancel any running PWM task and reset internal timing state.
         if self._task is None:
             self._enabled = False
             return
@@ -97,6 +102,7 @@ class SoftwarePWMTimer:
             off_seconds,
         )
 
+        # Duty cycle 0% means fixed OFF (no PWM loop).
         if duty_ratio <= 0.0:
             await self.stop(reason="off_or_zero")
             await self._async_set_stable_output(
@@ -107,6 +113,7 @@ class SoftwarePWMTimer:
             )
             return
 
+        # Duty cycle 100% means fixed ON (no PWM loop).
         if duty_ratio >= 1.0:
             await self.stop(reason="full_duty")
             await self._async_set_stable_output(
@@ -168,6 +175,7 @@ class SoftwarePWMTimer:
             _LOGGER.debug("Restarting PWM cycle for %s (reason=%s)", self._name, restart_cause)
 
         if self._task is None:
+            # First-time start of the PWM loop.
             _LOGGER.info("Starting PWM for %s", self._name)
             _LOGGER.debug("Starting PWM cycle for %s", self._name)
             _LOGGER.debug(
@@ -195,6 +203,7 @@ class SoftwarePWMTimer:
         self._update_event.set()
 
     async def _async_pwm_loop(self) -> None:
+        # Main PWM loop: toggles output on/off based on period and duty.
         loop = asyncio.get_running_loop()
         try:
             while self._enabled:
@@ -296,6 +305,7 @@ class SoftwarePWMTimer:
         await self._async_call_output(is_on, duty_percent)
 
     async def _async_call_output(self, is_on: bool, duty_percent: float) -> None:
+        # Delegate output change to injected callback and log errors.
         try:
             await self._set_output(is_on, duty_percent)
         except Exception:

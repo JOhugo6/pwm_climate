@@ -36,6 +36,7 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
     """Options flow for PWM Climate Controller integration."""
 
     def __init__(self, entry: config_entries.ConfigEntry) -> None:
+        # Keep the original entry so we can read defaults and current options.
         self.entry = entry
 
     def _get_option_value(self, key: str, default: Any) -> Any:
@@ -46,6 +47,7 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
         return default if value is None else value
 
     def _build_preset_defaults(self) -> dict[int, float]:
+        # Build the active preset map by overlaying entry data and options.
         return resolve_preset_temperatures(self.entry.data, self.entry.options)
 
     async def async_step_init(
@@ -53,6 +55,7 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
         user_input: dict[str, Any] | None = None,
     ):
         if user_input is not None:
+            # Save options as-is; validation is handled by selectors.
             return self.async_create_entry(title="", data=user_input)
 
         # ─────────────────────────────────────────────
@@ -61,6 +64,7 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
         # Build preset temperature fields for the options form.
         preset_fields: dict[Any, Any] = {}
 
+        # Resolve current preset defaults (entry data + existing options).
         current_presets = self._build_preset_defaults()
 
         for preset_id in PRESET_LABELS:
@@ -81,6 +85,7 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
             )
 
         # General tuning and limit options.
+        # Preset sliders are appended below so the form uses one schema.
         schema_data = {
                 vol.Optional(
                     CONF_DEFAULT_PRESET,

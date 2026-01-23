@@ -1,4 +1,4 @@
-# Global constants
+# Global constants used across the integration.
 
 DOMAIN = "pwm_climate"
 LOGGER_NAME = DOMAIN
@@ -7,7 +7,7 @@ LOGGER_NAME = DOMAIN
 CONF_NAME = "name"
 
 # ─────────────────────────────────────────────
-# Config keys
+# Config keys for config entries and options.
 # ─────────────────────────────────────────────
 
 CONF_TEMPERATURE_ENTITY = "temperature_entity"
@@ -29,7 +29,7 @@ CONF_PRESET_ECO_TEMPERATURE = "hvac_economy_temperature"
 CONF_PRESET_BUILDING_PROTECTION_TEMPERATURE = "hvac_building_protection_temperature"
 
 # ─────────────────────────────────────────────
-# Defaults
+# Defaults used when config entry/option values are missing or invalid.
 # ─────────────────────────────────────────────
 
 DEFAULT_TEMPERATURE_STEP = 0.1
@@ -38,6 +38,8 @@ DEFAULT_MAX_TEMPERATURE = 28.0
 DEFAULT_PWM_PERIOD = 900  # seconds
 DEFAULT_KP = 10.0
 
+# Preset tables below provide default temperatures, labels, and config keys.
+
 # ─────────────────────────────────────────────
 # HVAC modes – KNX DPT 20.102
 # ─────────────────────────────────────────────
@@ -45,6 +47,7 @@ DEFAULT_KP = 10.0
 # The dicts below map preset ids to defaults and labels.
 # value = default target temperature (°C)
 
+# Default target temperature per preset id.
 PRESET_DEFAULT_TEMPERATURES: dict[int, float] = {
     0: 22.0,  # Auto
     1: 24.0,  # Komfort
@@ -53,6 +56,7 @@ PRESET_DEFAULT_TEMPERATURES: dict[int, float] = {
     4: 8.0,   # Ochrana budovy
 }
 
+# Human-readable labels shown in the UI for each preset id.
 PRESET_LABELS: dict[int, str] = {
     0: "Auto",
     1: "Komfort",
@@ -61,6 +65,7 @@ PRESET_LABELS: dict[int, str] = {
     4: "Ochrana budovy",
 }
 
+# Map preset id to config key where its target temperature is stored.
 PRESET_TEMPERATURE_KEYS: dict[int, str] = {
     0: CONF_PRESET_AUTO_TEMPERATURE,
     1: CONF_PRESET_COMFORT_TEMPERATURE,
@@ -69,6 +74,7 @@ PRESET_TEMPERATURE_KEYS: dict[int, str] = {
     4: CONF_PRESET_BUILDING_PROTECTION_TEMPERATURE,
 }
 
+# Convenience list/constants derived from the preset tables.
 PRESET_NAMES: list[str] = list(PRESET_LABELS.values())
 DEFAULT_PRESET = PRESET_LABELS[0]
 PRESET_MANUAL = "manual"
