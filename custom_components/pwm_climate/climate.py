@@ -307,13 +307,8 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         return False
 
     def _get_preset_temperature(self, preset: str) -> float:
-        auto_preset = PRESET_LABELS.get(0)
-        if preset == auto_preset:
-            fallback_preset = PRESET_LABELS.get(1, preset)
-            preset = self._default_preset if self._default_preset != auto_preset else fallback_preset
-
         temperature = self._preset_temperatures.get(preset)
-        if temperature is not None:
+        if temperature is not None and math.isfinite(temperature):
             return temperature
         return PRESET_DEFAULT_TEMPERATURES[0]
 
