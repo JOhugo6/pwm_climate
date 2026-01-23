@@ -61,6 +61,7 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         temperature_entities = self._async_get_temperature_entities()
 
         if user_input is not None:
+            # Validate that the selected sensor is really a temperature entity.
             if user_input[CONF_TEMPERATURE_ENTITY] not in temperature_entities:
                 errors[CONF_TEMPERATURE_ENTITY] = "invalid_temperature_entity"
 
@@ -73,6 +74,7 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # ─────────────────────────────────────────────
         # HVAC mode temperature fields
         # ─────────────────────────────────────────────
+        # Build preset temperature fields dynamically for the form.
         preset_fields: dict[Any, Any] = {}
 
         for preset_id in PRESET_LABELS:
@@ -92,6 +94,7 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
             )
 
+        # Main config fields for entity selection and control parameters.
         schema_data = {
                 vol.Required(CONF_NAME): str,
 
@@ -205,6 +208,7 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _async_get_temperature_entities(self) -> list[str]:
+        # Filter sensor entities by device_class or unit-of-measurement.
         registry = er.async_get(self.hass)
         registry_entries = {
             entry.entity_id: entry
