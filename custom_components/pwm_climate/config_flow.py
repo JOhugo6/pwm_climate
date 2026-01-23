@@ -49,6 +49,7 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> PWMClimateOptionsFlowHandler:
+        # Hand over to the options flow handler for edits after initial setup.
         return PWMClimateOptionsFlowHandler(config_entry)
 
     async def async_step_user(
@@ -57,7 +58,9 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ):
         """Initial configuration step."""
 
+        # Collect validation errors for the form and reuse them on redisplay.
         errors: dict[str, str] = {}
+        # Build the list of eligible temperature sensors for the selector.
         temperature_entities = self._async_get_temperature_entities()
 
         if user_input is not None:
@@ -95,6 +98,7 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         # Main config fields for entity selection and control parameters.
+        # Preset fields are injected below so the full form is built in one schema.
         schema_data = {
                 vol.Required(CONF_NAME): str,
 
@@ -208,7 +212,7 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _async_get_temperature_entities(self) -> list[str]:
-        # Filter sensor entities by device_class or unit-of-measurement.
+        # Filter sensor entities by device_class or unit_of_measurement.
         registry = er.async_get(self.hass)
         registry_entries = {
             entry.entity_id: entry
@@ -216,9 +220,11 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if entry.domain == "sensor"
         }
 
+        # Merge registry entities and runtime states to catch both.
         entities: set[str] = set(registry_entries)
         entities.update(state.entity_id for state in self.hass.states.async_all("sensor"))
 
+        # Keep only entities that look like temperature sensors.
         valid_entities: list[str] = []
         for entity_id in sorted(entities):
             entry = registry_entries.get(entity_id)
@@ -230,6 +236,7 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     def _is_temperature_sensor(entry: Any | None, state: Any | None) -> bool:
+        # Accept device_class temperature or unit of measurement in C.
         device_class = entry.device_class if entry and entry.device_class else None
         unit = None
 

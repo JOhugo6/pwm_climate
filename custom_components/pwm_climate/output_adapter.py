@@ -16,14 +16,18 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(DOMAIN)
 
+# Domains treated as on/off outputs.
 _BINARY_DOMAINS = {"switch", "input_boolean", "light"}
+# Domains treated as numeric outputs (0-100%).
 _NUMBER_DOMAINS = {"number", "input_number"}
+# Availability probing timings for services/entities that may load late.
 _DEFAULT_AVAILABILITY_TIMEOUT = 10.0
 _DEFAULT_AVAILABILITY_INTERVAL = 0.25
 _DEFAULT_AVAILABILITY_COOLDOWN = 30.0
 
 
 def _get_entity_domain(entity_id: str | None) -> str | None:
+    # Parse "domain.entity" into "domain" with basic validation.
     if not entity_id or "." not in entity_id:
         return None
     return entity_id.split(".", 1)[0]
@@ -53,10 +57,12 @@ class PWMOutputAdapter:
         self._next_availability_check = 0.0
 
     def set_name(self, name: str | None) -> None:
+        # Update friendly name used in logs.
         if name:
             self._name = name
 
     def update_output_entity(self, entity_id: str | None) -> None:
+        # Swap target entity and reset cached output state.
         self._entity_id = entity_id
         self._domain, self._mode = self._resolve_output_mode(entity_id)
         self._last_state = None
@@ -66,6 +72,7 @@ class PWMOutputAdapter:
 
     @property
     def supports_output(self) -> bool:
+        # Only true when we have a target entity and a supported mode.
         return self._entity_id is not None and self._mode is not None
 
     async def async_set_pwm_output(self, is_on: bool, power_percent: float) -> None:
@@ -105,6 +112,7 @@ class PWMOutputAdapter:
 
     @staticmethod
     def _normalize_percent(value: float) -> float | None:
+        # Normalize to a finite float in [0, 100].
         try:
             percent = float(value)
         except (TypeError, ValueError):
@@ -177,6 +185,7 @@ class PWMOutputAdapter:
                 self._last_state = False
 
     def _resolve_climate_temperature(self) -> float | None:
+        # Ask the parent climate entity for the target setpoint.
         if self._get_climate_temperature is None:
             _LOGGER.warning(
                 "No output temperature provider for %s; skipping climate output",
@@ -194,6 +203,7 @@ class PWMOutputAdapter:
         return float(temperature)
 
     async def _async_call_service(self, domain: str, service: str, data: dict[str, Any]) -> bool:
+        # Verify service + entity exist before calling to avoid noisy errors.
         if not await self._async_ensure_service(domain, service):
             _LOGGER.error(
                 "Service %s.%s not found while setting %s; check output entity/domain setup",
@@ -228,12 +238,15 @@ class PWMOutputAdapter:
         return True
 
     def _should_wait_for_availability(self) -> bool:
+        # Throttle availability checks to avoid spamming logs.
         return time.monotonic() >= self._next_availability_check
 
     def _set_availability_backoff(self) -> None:
+        # Backoff window after failed availability checks.
         self._next_availability_check = time.monotonic() + _DEFAULT_AVAILABILITY_COOLDOWN
 
     async def _async_wait_for(self, predicate: Callable[[], bool]) -> bool:
+        # Poll a predicate until it returns True or we hit the timeout.
         deadline = time.monotonic() + _DEFAULT_AVAILABILITY_TIMEOUT
         while time.monotonic() < deadline:
             if predicate():
@@ -242,6 +255,7 @@ class PWMOutputAdapter:
         return predicate()
 
     async def _async_ensure_service(self, domain: str, service: str) -> bool:
+        # Wait briefly for service registration on startup if needed.
         if self._hass.services.has_service(domain, service):
             return True
         if not self._should_wait_for_availability():
@@ -253,6 +267,7 @@ class PWMOutputAdapter:
         return False
 
     async def _async_ensure_entity(self, entity_id: str | None) -> bool:
+        # Wait briefly for entity registration on startup if needed.
         if not entity_id:
             return False
         if self._hass.states.get(entity_id) is not None:
@@ -266,6 +281,7 @@ class PWMOutputAdapter:
         return False
 
     def _log_unsupported_once(self) -> None:
+        # Emit a single warning when output entity is missing or unsupported.
         if self._warned_unsupported:
             return
         self._warned_unsupported = True
