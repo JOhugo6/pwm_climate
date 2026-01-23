@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
+import time
 from collections.abc import Callable
 from typing import Any
 
@@ -16,6 +18,9 @@ _LOGGER = logging.getLogger(DOMAIN)
 
 _BINARY_DOMAINS = {"switch", "input_boolean", "light"}
 _NUMBER_DOMAINS = {"number", "input_number"}
+_DEFAULT_AVAILABILITY_TIMEOUT = 10.0
+_DEFAULT_AVAILABILITY_INTERVAL = 0.25
+_DEFAULT_AVAILABILITY_COOLDOWN = 30.0
 
 
 def _get_entity_domain(entity_id: str | None) -> str | None:
@@ -45,6 +50,7 @@ class PWMOutputAdapter:
         self._last_state: bool | None = None
         self._last_value: float | None = None
         self._warned_unsupported = False
+        self._next_availability_check = 0.0
 
     def set_name(self, name: str | None) -> None:
         if name:
@@ -56,6 +62,7 @@ class PWMOutputAdapter:
         self._last_state = None
         self._last_value = None
         self._warned_unsupported = False
+        self._next_availability_check = 0.0
 
     @property
     def supports_output(self) -> bool:
@@ -187,7 +194,7 @@ class PWMOutputAdapter:
         return float(temperature)
 
     async def _async_call_service(self, domain: str, service: str, data: dict[str, Any]) -> bool:
-        if not self._hass.services.has_service(domain, service):
+        if not await self._async_ensure_service(domain, service):
             _LOGGER.error(
                 "Service %s.%s not found while setting %s; check output entity/domain setup",
                 domain,
@@ -195,7 +202,7 @@ class PWMOutputAdapter:
                 self._entity_id,
             )
             return False
-        if self._entity_id and self._hass.states.get(self._entity_id) is None:
+        if not await self._async_ensure_entity(self._entity_id):
             _LOGGER.error(
                 "Output entity %s not found while calling %s.%s",
                 self._entity_id,
@@ -219,6 +226,44 @@ class PWMOutputAdapter:
             )
             return False
         return True
+
+    def _should_wait_for_availability(self) -> bool:
+        return time.monotonic() >= self._next_availability_check
+
+    def _set_availability_backoff(self) -> None:
+        self._next_availability_check = time.monotonic() + _DEFAULT_AVAILABILITY_COOLDOWN
+
+    async def _async_wait_for(self, predicate: Callable[[], bool]) -> bool:
+        deadline = time.monotonic() + _DEFAULT_AVAILABILITY_TIMEOUT
+        while time.monotonic() < deadline:
+            if predicate():
+                return True
+            await asyncio.sleep(_DEFAULT_AVAILABILITY_INTERVAL)
+        return predicate()
+
+    async def _async_ensure_service(self, domain: str, service: str) -> bool:
+        if self._hass.services.has_service(domain, service):
+            return True
+        if not self._should_wait_for_availability():
+            return False
+        if await self._async_wait_for(lambda: self._hass.services.has_service(domain, service)):
+            self._next_availability_check = 0.0
+            return True
+        self._set_availability_backoff()
+        return False
+
+    async def _async_ensure_entity(self, entity_id: str | None) -> bool:
+        if not entity_id:
+            return False
+        if self._hass.states.get(entity_id) is not None:
+            return True
+        if not self._should_wait_for_availability():
+            return False
+        if await self._async_wait_for(lambda: self._hass.states.get(entity_id) is not None):
+            self._next_availability_check = 0.0
+            return True
+        self._set_availability_backoff()
+        return False
 
     def _log_unsupported_once(self) -> None:
         if self._warned_unsupported:
