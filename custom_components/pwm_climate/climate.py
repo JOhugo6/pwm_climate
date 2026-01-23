@@ -25,7 +25,6 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from .const import (
     CONF_DEFAULT_PRESET,
     CONF_HUMIDITY_ENTITY,
-    CONF_HVAC_MODES,
     CONF_MAX_TEMPERATURE,
     CONF_MIN_TEMPERATURE,
     CONF_NAME,
@@ -45,8 +44,8 @@ from .const import (
     PRESET_LABELS,
     PRESET_MANUAL,
     PRESET_NAMES,
-    PRESET_TEMPERATURE_KEYS,
 )
+from .preset_helpers import resolve_preset_temperatures
 from .output_adapter import PWMOutputAdapter
 from .pwm_timer import SoftwarePWMTimer
 
@@ -100,69 +99,14 @@ def _coerce_int(value: Any, default: int) -> int:
         return default
 
 
-def _merge_preset_temperatures(
-    base: dict[str, float],
-    raw: Mapping[Any, Any] | None,
-) -> dict[str, float]:
-    # Merge preset temperatures from a mapping keyed by preset id or name.
-    if not raw:
-        return base
-
-    for key, value in raw.items():
-        preset_name: str | None = None
-        if isinstance(key, str) and key in base:
-            preset_name = key
-        else:
-            try:
-                preset_id = int(key)
-            except (TypeError, ValueError):
-                continue
-            preset_name = PRESET_LABELS.get(preset_id)
-
-        if not preset_name or preset_name not in base:
-            continue
-
-        try:
-            base[preset_name] = float(value)
-        except (TypeError, ValueError):
-            continue
-
-    return base
-
-
-def _apply_flat_preset_temperatures(
-    base: dict[str, float],
-    source: Mapping[str, Any] | None,
-) -> dict[str, float]:
-    # Merge preset temperatures from flat config keys.
-    if not source:
-        return base
-
-    for preset_id, key in PRESET_TEMPERATURE_KEYS.items():
-        if key not in source:
-            continue
-        preset_name = PRESET_LABELS.get(preset_id)
-        if not preset_name:
-            continue
-        try:
-            base[preset_name] = float(source[key])
-        except (TypeError, ValueError):
-            continue
-
-    return base
-
-
 def _resolve_preset_temperatures(entry: ConfigEntry) -> dict[str, float]:
     # Start from defaults and then overlay config data/options (newer wins).
-    temperatures = {
-        PRESET_LABELS[preset_id]: PRESET_DEFAULT_TEMPERATURES[preset_id]
-        for preset_id in PRESET_LABELS
+    temperatures_by_id = resolve_preset_temperatures(entry.data, entry.options)
+    return {
+        PRESET_LABELS[preset_id]: temperature
+        for preset_id, temperature in temperatures_by_id.items()
+        if preset_id in PRESET_LABELS
     }
-    temperatures = _apply_flat_preset_temperatures(temperatures, entry.data)
-    temperatures = _merge_preset_temperatures(temperatures, entry.data.get(CONF_HVAC_MODES))
-    temperatures = _apply_flat_preset_temperatures(temperatures, entry.options)
-    temperatures = _merge_preset_temperatures(temperatures, entry.options.get(CONF_HVAC_MODES))
-    return temperatures
 
 
 def _resolve_default_preset(entry: ConfigEntry, presets: Mapping[str, float]) -> str:

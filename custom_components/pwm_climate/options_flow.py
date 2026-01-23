@@ -24,13 +24,12 @@ from .const import (
     DEFAULT_KP,
 
     CONF_DEFAULT_PRESET,
-    CONF_HVAC_MODES,
     DEFAULT_PRESET,
     PRESET_LABELS,
-    PRESET_DEFAULT_TEMPERATURES,
     PRESET_TEMPERATURE_KEYS,
     PRESET_NAMES,
 )
+from .preset_helpers import resolve_preset_temperatures
 
 
 class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
@@ -46,54 +45,8 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
             value = self.entry.data.get(key, default)
         return default if value is None else value
 
-    def _apply_flat_preset_temperatures(
-        self,
-        base: dict[int, float],
-        source: dict[str, Any] | None,
-    ) -> dict[int, float]:
-        if not isinstance(source, dict):
-            return base
-
-        for preset_id, key in PRESET_TEMPERATURE_KEYS.items():
-            if key not in source:
-                continue
-            try:
-                base[preset_id] = float(source[key])
-            except (TypeError, ValueError):
-                continue
-
-        return base
-
-    def _merge_preset_temperatures(
-        self,
-        base: dict[int, float],
-        raw: dict[Any, Any] | None,
-    ) -> dict[int, float]:
-        if not isinstance(raw, dict):
-            return base
-
-        for key, value in raw.items():
-            try:
-                preset_id = int(key)
-            except (TypeError, ValueError):
-                continue
-            if preset_id not in base:
-                continue
-            try:
-                base[preset_id] = float(value)
-            except (TypeError, ValueError):
-                continue
-
-        return base
-
     def _build_preset_defaults(self) -> dict[int, float]:
-        # Start from defaults and apply stored values from data/options.
-        defaults = dict(PRESET_DEFAULT_TEMPERATURES)
-        defaults = self._apply_flat_preset_temperatures(defaults, self.entry.data)
-        defaults = self._merge_preset_temperatures(defaults, self.entry.data.get(CONF_HVAC_MODES))
-        defaults = self._apply_flat_preset_temperatures(defaults, self.entry.options)
-        defaults = self._merge_preset_temperatures(defaults, self.entry.options.get(CONF_HVAC_MODES))
-        return defaults
+        return resolve_preset_temperatures(self.entry.data, self.entry.options)
 
     async def async_step_init(
         self,
