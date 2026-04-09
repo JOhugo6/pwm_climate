@@ -404,9 +404,29 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._set_target_temperature(temperature, reason="manual_override")
         self.async_write_ha_state()
 
+    def _reset_state_to_defaults(self) -> None:
+        # Restore the same in-memory defaults used by the constructor.
+        self._attr_hvac_mode = HVACMode.OFF
+        self._active_preset = self._default_preset
+        self._manual_override = False
+        self._attr_preset_mode = self._active_preset
+        self._attr_target_temperature = self._get_preset_temperature(self._active_preset)
+
     async def _async_restore_state(self) -> None:
         # Restore last HVAC mode, presets, and setpoint if available.
-        last_state = await self.async_get_last_state()
+        try:
+            last_state = await self.async_get_last_state()
+        except Exception as err:
+            entity_name = (
+                getattr(self, "entity_id", None) or self._attr_name or self._config_entry.entry_id
+            )
+            _LOGGER.error(
+                "Failed to restore last state for %s; using constructor defaults: %s",
+                entity_name,
+                err,
+            )
+            self._reset_state_to_defaults()
+            return
         if last_state is None:
             return
 

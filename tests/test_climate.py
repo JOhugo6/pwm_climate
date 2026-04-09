@@ -31,6 +31,12 @@ class TaskTrackingHass:
         return task
 
 
+@dataclass(slots=True)
+class RestoreState:
+    state: Any
+    attributes: dict[str, Any] = field(default_factory=dict)
+
+
 def _build_controller(*, humidity: float | None = 42.0) -> tuple[object, WriteRecorder]:
     controller = climate.PWMClimateController.__new__(climate.PWMClimateController)
     recorder = WriteRecorder()
@@ -58,6 +64,12 @@ def _build_initialized_controller(
         title=title,
     )
     return climate.PWMClimateController(hass, entry)
+
+
+def _build_restore_controller() -> climate.PWMClimateController:
+    controller = _build_initialized_controller(title="Study PWM")
+    controller.entity_id = "climate.study"
+    return controller
 
 
 def _build_regulation_controller() -> tuple[object, TaskTrackingHass, WriteRecorder]:
@@ -221,6 +233,98 @@ def test_constructor_logs_and_disables_output_when_output_entity_is_missing(
         and "Missing output entity for config entry Study PWM" in record.getMessage()
         for record in caplog.records
     )
+
+
+def test_async_restore_state_resets_to_defaults_when_last_state_lookup_fails(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    async def scenario() -> None:
+        controller = _build_restore_controller()
+        caplog.clear()
+        caplog.set_level(logging.ERROR, logger=climate.DOMAIN)
+        controller._attr_hvac_mode = climate.HVACMode.HEAT
+        controller._active_preset = "Komfort"
+        controller._manual_override = True
+        controller._attr_preset_mode = climate.PRESET_MANUAL
+        controller._attr_target_temperature = 25.0
+
+        async def raise_last_state() -> RestoreState:
+            raise RuntimeError("restore unavailable")
+
+        controller.async_get_last_state = raise_last_state
+
+        await controller._async_restore_state()
+
+        assert controller._attr_hvac_mode == climate.HVACMode.OFF
+        assert controller._active_preset == controller._default_preset
+        assert controller._manual_override is False
+        assert controller._attr_preset_mode == controller._default_preset
+        assert controller._attr_target_temperature == controller._get_preset_temperature(
+            controller._default_preset
+        )
+
+    _run(scenario())
+
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.levelno == logging.ERROR
+    assert record.exc_info is None
+    assert "Failed to restore last state for climate.study" in record.getMessage()
+    assert "using constructor defaults" in record.getMessage()
+    assert "restore unavailable" in record.getMessage()
+
+
+def test_async_restore_state_is_noop_when_last_state_is_missing() -> None:
+    async def scenario() -> None:
+        controller = _build_restore_controller()
+        controller._attr_hvac_mode = climate.HVACMode.HEAT
+        controller._active_preset = "Komfort"
+        controller._manual_override = True
+        controller._attr_preset_mode = climate.PRESET_MANUAL
+        controller._attr_target_temperature = 25.0
+
+        async def return_none() -> RestoreState | None:
+            return None
+
+        controller.async_get_last_state = return_none
+
+        await controller._async_restore_state()
+
+        assert controller._attr_hvac_mode == climate.HVACMode.HEAT
+        assert controller._active_preset == "Komfort"
+        assert controller._manual_override is True
+        assert controller._attr_preset_mode == climate.PRESET_MANUAL
+        assert controller._attr_target_temperature == 25.0
+
+    _run(scenario())
+
+
+def test_async_restore_state_preserves_valid_restored_state() -> None:
+    async def scenario() -> None:
+        controller = _build_restore_controller()
+
+        async def return_last_state() -> RestoreState:
+            return RestoreState(
+                state=climate.HVACMode.HEAT,
+                attributes={
+                    climate.ATTR_PRESET_MODE: climate.PRESET_MANUAL,
+                    "active_preset": "Komfort",
+                    "manual_override": True,
+                    climate.ATTR_TEMPERATURE: 23.5,
+                },
+            )
+
+        controller.async_get_last_state = return_last_state
+
+        await controller._async_restore_state()
+
+        assert controller._attr_hvac_mode == climate.HVACMode.HEAT
+        assert controller._active_preset == "Komfort"
+        assert controller._manual_override is True
+        assert controller._attr_preset_mode == climate.PRESET_MANUAL
+        assert controller._attr_target_temperature == 23.5
+
+    _run(scenario())
 
 
 def test_handle_regulation_input_change_coalesces_pending_updates_and_uses_latest_reason() -> None:
