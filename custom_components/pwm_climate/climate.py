@@ -278,6 +278,8 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._unsub_regulation_listener: Callable[[], None] | None = None
         self._unsub_humidity_listener: Callable[[], None] | None = None
         self._unsub_entry_update_listener: Callable[[], None] | None = None
+        self._regulation_update_task: asyncio.Task[None] | None = None
+        self._pending_regulation_update_reason: str | None = None
         self._is_removing = False
         # Serialize output updates to avoid overlapping PWM recalculations.
         self._pwm_lock = asyncio.Lock()
@@ -507,11 +509,64 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
 
     @callback
     def _handle_regulation_input_change(self, *, reason: str) -> None:
-        # Schedule recalculation of PWM output.
+        # Coalesce repeated regulation updates into one tracked task.
         if self._is_removing:
             return
 
-        self.hass.async_create_task(self._async_update_output(reason=reason))
+        self._pending_regulation_update_reason = reason
+
+        task = self._regulation_update_task
+        if task is not None and not task.done():
+            return
+
+        task = self.hass.async_create_task(self._async_process_regulation_updates())
+        self._regulation_update_task = task
+        task.add_done_callback(self._async_on_regulation_update_task_done)
+
+    async def _async_process_regulation_updates(self) -> None:
+        # Apply the latest requested regulation update and rerun if a newer request arrives.
+        while not self._is_removing:
+            reason = self._pending_regulation_update_reason
+            if reason is None:
+                return
+
+            self._pending_regulation_update_reason = None
+            await self._async_update_output(reason=reason)
+
+    @callback
+    def _async_on_regulation_update_task_done(self, task: asyncio.Task[None]) -> None:
+        if self._regulation_update_task is task:
+            self._regulation_update_task = None
+
+        try:
+            exception = task.exception()
+        except asyncio.CancelledError:
+            _LOGGER.debug("Cancelled regulation update task for %s", self.entity_id)
+            return
+
+        if exception is not None:
+            _LOGGER.error(
+                "Regulation update task failed for %s",
+                self.entity_id,
+                exc_info=exception,
+            )
+
+    async def _async_cancel_regulation_update_task(self) -> None:
+        self._pending_regulation_update_reason = None
+        task = self._regulation_update_task
+        if task is None:
+            return
+
+        if task.done():
+            if self._regulation_update_task is task:
+                self._regulation_update_task = None
+            return
+
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
     @callback
     def _async_regulation_state_changed(self, event: Event) -> None:
@@ -726,6 +781,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         self._async_unsubscribe_temperature_listener()
         self._async_unsubscribe_regulation_listener()
         self._async_unsubscribe_humidity_listener()
+        await self._async_cancel_regulation_update_task()
         await self._async_stop_pwm_task(reason="remove")
 
         if self._unsub_entry_update_listener is not None:
