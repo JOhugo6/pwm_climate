@@ -11,6 +11,7 @@ from typing import Any
 
 from homeassistant.const import ATTR_TEMPERATURE
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
 
@@ -240,12 +241,15 @@ class PWMOutputAdapter:
                 target_entity,
             )
             return False
-        except Exception:
-            _LOGGER.exception(
-                "Failed calling %s.%s for output entity %s",
+        except asyncio.CancelledError:
+            raise
+        except HomeAssistantError as err:
+            _LOGGER.error(
+                "Failed calling %s.%s for output entity %s: %s",
                 domain,
                 service,
                 target_entity,
+                err,
             )
             return False
         return True

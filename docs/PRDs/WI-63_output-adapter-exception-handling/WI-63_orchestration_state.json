@@ -1,0 +1,69 @@
+{
+  "feature_id": "WI-63",
+  "role": "PROCESS_COORDINATOR",
+  "updated_at": "2026-04-09T08:26:55.2801053+02:00",
+  "process_status": "READY_FOR_FINAL",
+  "selected_prd_folder": "docs/PRDs/WI-63_output-adapter-exception-handling",
+  "selected_prd_path": "docs/PRDs/WI-63_output-adapter-exception-handling/WI-63_Implementation_Assignment.md",
+  "dispatch_mode": "SUB_AGENT",
+  "active_dispatch": null,
+  "phase_gates": {
+    "gate_1_prd_readiness": {
+      "status": "PASSED",
+      "basis": [
+        "Single active PRD folder identified at docs/PRDs/WI-63_output-adapter-exception-handling.",
+        "WI-63_Implementation_Assignment.md exists and contains FR, AC, scope, and testing requirements."
+      ]
+    },
+    "gate_2_engineering_to_review": {
+      "status": "PASSED",
+      "basis": [
+        "Implementation exists in custom_components/pwm_climate/output_adapter.py.",
+        "WI-63_TraceMatrix.md exists and is populated for all FR and AC rows.",
+        "SE reported repo-local pytest validation passing."
+      ]
+    },
+    "gate_3_review_to_qa": {
+      "status": "PASSED",
+      "basis": [
+        "WI-63_CR-01_20260409.md exists.",
+        "Latest CR decision is APPROVED.",
+        "WI-63_TraceMatrix.md links the approved CR artifact."
+      ]
+    },
+    "gate_4_qa_to_final": {
+      "status": "PASSED",
+      "basis": [
+        "WI-63_TR-01_20260409.md exists and reports COMPLETE.",
+        "WI-63_TraceMatrix.md section 8 is marked COMPLETE.",
+        "Docker smoke validation and pytest evidence are published with no blocker."
+      ]
+    }
+  },
+  "dispatch_history": [
+    {
+      "role": "SE",
+      "agent_id": "019d70de-4832-71c2-b682-9a92cf8bca46",
+      "nickname": "Jason",
+      "status": "COMPLETED",
+      "summary": "Implemented WI-63 exception handling, confirmed repo-local pytest, and initialized WI-63_TraceMatrix.md."
+    },
+    {
+      "role": "CR",
+      "agent_id": "019d70e4-ed23-71e3-bc32-a3e44d1417b3",
+      "nickname": "Boyle",
+      "status": "APPROVED"
+    },
+    {
+      "role": "QA",
+      "agent_id": "019d70e7-bbc9-7031-8d51-69c0ba3eef9b",
+      "nickname": "Bohr",
+      "status": "COMPLETE"
+    }
+  ],
+  "blockers": [],
+  "mandatory_next_transition": {
+    "next_state": "FINAL",
+    "rule": "All mandatory gates passed and the latest QA cycle is COMPLETE."
+  }
+}
