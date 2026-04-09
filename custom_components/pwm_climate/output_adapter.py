@@ -20,6 +20,8 @@ _LOGGER = logging.getLogger(DOMAIN)
 _BINARY_DOMAINS = {"switch", "input_boolean", "light"}
 # Domains treated as numeric outputs (0-100%).
 _NUMBER_DOMAINS = {"number", "input_number"}
+# Maximum time to wait for a blocking Home Assistant service call.
+_DEFAULT_SERVICE_CALL_TIMEOUT = 10.0
 # Availability probing timings for services/entities that may load late.
 _DEFAULT_AVAILABILITY_TIMEOUT = 10.0
 _DEFAULT_AVAILABILITY_INTERVAL = 0.25
@@ -220,19 +222,30 @@ class PWMOutputAdapter:
                 service,
             )
             return False
+        target_entity = data.get("entity_id", self._entity_id)
         try:
-            await self._hass.services.async_call(
+            async with asyncio.timeout(_DEFAULT_SERVICE_CALL_TIMEOUT):
+                await self._hass.services.async_call(
+                    domain,
+                    service,
+                    data,
+                    blocking=True,
+                )
+        except TimeoutError:
+            _LOGGER.error(
+                "Timed out after %.1fs calling %s.%s for output entity %s",
+                _DEFAULT_SERVICE_CALL_TIMEOUT,
                 domain,
                 service,
-                data,
-                blocking=True,
+                target_entity,
             )
+            return False
         except Exception:
             _LOGGER.exception(
-                "Failed setting %s via %s.%s",
-                self._entity_id,
+                "Failed calling %s.%s for output entity %s",
                 domain,
                 service,
+                target_entity,
             )
             return False
         return True
