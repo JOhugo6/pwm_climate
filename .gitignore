@@ -167,6 +167,5 @@ CLAUDE.md
 /docs
 /docker
 /scripts
-/tests
 .env.example
 docker-compose.yml

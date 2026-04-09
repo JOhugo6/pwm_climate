@@ -646,8 +646,16 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         if self._is_removing:
             return
 
-        old_state: State | None = event.data.get("old_state")
-        new_state: State | None = event.data["new_state"]
+        event_data = event.data if isinstance(event.data, Mapping) else {}
+        old_state: State | None = event_data.get("old_state")
+        new_state: State | None = event_data.get("new_state")
+        if new_state is None:
+            _LOGGER.debug(
+                "Ignoring humidity event for %s because event payload has no usable new_state",
+                self._humidity_sensor_entity_id,
+            )
+            return
+
         if old_state is not None and new_state is not None and old_state.state == new_state.state:
             return
 
