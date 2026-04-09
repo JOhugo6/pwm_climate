@@ -5,6 +5,48 @@ import types
 from enum import IntFlag
 from typing import Any
 
+try:
+    import voluptuous as vol  # type: ignore[no-redef]
+except ModuleNotFoundError:
+    vol = types.ModuleType("voluptuous")
+
+    class _Marker:
+        def __init__(self, kind: str, key: Any, default: Any = None) -> None:
+            self.kind = kind
+            self.key = key
+            self.default = default
+
+        def __hash__(self) -> int:
+            return hash((self.kind, self.key, self.default))
+
+        def __eq__(self, other: object) -> bool:
+            if not isinstance(other, _Marker):
+                return False
+            return (
+                self.kind == other.kind
+                and self.key == other.key
+                and self.default == other.default
+            )
+
+    def Required(key: Any, default: Any = None) -> _Marker:
+        return _Marker("required", key, default)
+
+    def Optional(key: Any, default: Any = None) -> _Marker:
+        return _Marker("optional", key, default)
+
+    def Coerce(type_: Any) -> Any:
+        return type_
+
+    class Schema:
+        def __init__(self, schema: Any) -> None:
+            self.schema = schema
+
+    vol.Required = Required
+    vol.Optional = Optional
+    vol.Coerce = Coerce
+    vol.Schema = Schema
+    sys.modules["voluptuous"] = vol
+
 
 def _install_homeassistant_stubs() -> None:
     if "homeassistant" in sys.modules:
@@ -20,8 +62,10 @@ def _install_homeassistant_stubs() -> None:
     climate_module.__path__ = []  # type: ignore[attr-defined]
 
     climate_const_module = types.ModuleType("homeassistant.components.climate.const")
+    sensor_module = types.ModuleType("homeassistant.components.sensor")
 
     const_module = types.ModuleType("homeassistant.const")
+    const_module.CONF_NAME = "name"
     const_module.ATTR_TEMPERATURE = "temperature"
     const_module.STATE_UNAVAILABLE = "unavailable"
     const_module.STATE_UNKNOWN = "unknown"
@@ -87,11 +131,46 @@ def _install_homeassistant_stubs() -> None:
 
     config_entries_module.ConfigEntry = ConfigEntry
 
+    class _FlowBase:
+        """Minimal base class for config and options flows."""
+
+        def async_create_entry(self, *, title: str, data: dict[str, Any]) -> dict[str, Any]:
+            return {"type": "create_entry", "title": title, "data": data}
+
+        def async_show_form(
+            self,
+            *,
+            step_id: str,
+            data_schema: Any,
+            errors: dict[str, str] | None = None,
+        ) -> dict[str, Any]:
+            return {
+                "type": "form",
+                "step_id": step_id,
+                "data_schema": data_schema,
+                "errors": {} if errors is None else errors,
+            }
+
+    class ConfigFlow(_FlowBase):
+        """Minimal ConfigFlow stub for module imports."""
+
+        def __init_subclass__(cls, **kwargs: Any) -> None:
+            cls.domain = kwargs.pop("domain", None)
+            super().__init_subclass__()
+
+    class OptionsFlow(_FlowBase):
+        """Minimal OptionsFlow stub for module imports."""
+
+    config_entries_module.ConfigFlow = ConfigFlow
+    config_entries_module.OptionsFlow = OptionsFlow
+
     helpers_module = types.ModuleType("homeassistant.helpers")
     helpers_module.__path__ = []  # type: ignore[attr-defined]
 
     entity_platform_module = types.ModuleType("homeassistant.helpers.entity_platform")
     entity_platform_module.AddEntitiesCallback = Any
+
+    entity_registry_module = types.ModuleType("homeassistant.helpers.entity_registry")
 
     event_module = types.ModuleType("homeassistant.helpers.event")
 
@@ -100,6 +179,64 @@ def _install_homeassistant_stubs() -> None:
         return lambda: None
 
     event_module.async_track_state_change_event = async_track_state_change_event
+
+    def async_get(hass: Any) -> Any:
+        registry = getattr(hass, "entity_registry", None)
+        if registry is None:
+            registry = types.SimpleNamespace(entities={})
+            setattr(hass, "entity_registry", registry)
+        return registry
+
+    entity_registry_module.async_get = async_get
+
+    selector_module = types.ModuleType("homeassistant.helpers.selector")
+
+    class _SelectorConfig:
+        def __init__(self, **kwargs: Any) -> None:
+            self.__dict__.update(kwargs)
+
+    class _Selector:
+        def __init__(self, config: Any) -> None:
+            self.config = config
+
+    class EntitySelectorConfig(_SelectorConfig):
+        pass
+
+    class NumberSelectorConfig(_SelectorConfig):
+        pass
+
+    class SelectSelectorConfig(_SelectorConfig):
+        pass
+
+    class EntitySelector(_Selector):
+        pass
+
+    class NumberSelector(_Selector):
+        pass
+
+    class SelectSelector(_Selector):
+        pass
+
+    class NumberSelectorMode:
+        SLIDER = "slider"
+        BOX = "box"
+
+    class SelectSelectorMode:
+        DROPDOWN = "dropdown"
+
+    selector_module.EntitySelector = EntitySelector
+    selector_module.EntitySelectorConfig = EntitySelectorConfig
+    selector_module.NumberSelector = NumberSelector
+    selector_module.NumberSelectorConfig = NumberSelectorConfig
+    selector_module.NumberSelectorMode = NumberSelectorMode
+    selector_module.SelectSelector = SelectSelector
+    selector_module.SelectSelectorConfig = SelectSelectorConfig
+    selector_module.SelectSelectorMode = SelectSelectorMode
+
+    class SensorDeviceClass:
+        TEMPERATURE = "temperature"
+
+    sensor_module.SensorDeviceClass = SensorDeviceClass
 
     restore_state_module = types.ModuleType("homeassistant.helpers.restore_state")
 
@@ -129,6 +266,7 @@ def _install_homeassistant_stubs() -> None:
     climate_module.ClimateEntityFeature = ClimateEntityFeature
     climate_const_module.ClimateEntityFeature = ClimateEntityFeature
     climate_const_module.ClimateEntity = ClimateEntity
+    sensor_module.SensorEntity = object
 
     homeassistant_module.components = components_module
     homeassistant_module.const = const_module
@@ -138,15 +276,19 @@ def _install_homeassistant_stubs() -> None:
     homeassistant_module.helpers = helpers_module
 
     components_module.climate = climate_module
+    components_module.sensor = sensor_module
     climate_module.const = climate_const_module
     helpers_module.entity_platform = entity_platform_module
     helpers_module.event = event_module
+    helpers_module.entity_registry = entity_registry_module
+    helpers_module.selector = selector_module
     helpers_module.restore_state = restore_state_module
 
     sys.modules["homeassistant"] = homeassistant_module
     sys.modules["homeassistant.components"] = components_module
     sys.modules["homeassistant.components.climate"] = climate_module
     sys.modules["homeassistant.components.climate.const"] = climate_const_module
+    sys.modules["homeassistant.components.sensor"] = sensor_module
     sys.modules["homeassistant.const"] = const_module
     sys.modules["homeassistant.core"] = core_module
     sys.modules["homeassistant.exceptions"] = exceptions_module
@@ -154,6 +296,8 @@ def _install_homeassistant_stubs() -> None:
     sys.modules["homeassistant.helpers"] = helpers_module
     sys.modules["homeassistant.helpers.entity_platform"] = entity_platform_module
     sys.modules["homeassistant.helpers.event"] = event_module
+    sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_module
+    sys.modules["homeassistant.helpers.selector"] = selector_module
     sys.modules["homeassistant.helpers.restore_state"] = restore_state_module
 
 

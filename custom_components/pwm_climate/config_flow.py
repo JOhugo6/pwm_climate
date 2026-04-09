@@ -61,7 +61,7 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # Collect validation errors for the form and reuse them on redisplay.
         errors: dict[str, str] = {}
         # Build the list of eligible temperature sensors for the selector.
-        temperature_entities = self._async_get_temperature_entities()
+        temperature_entities = self._get_temperature_entities()
 
         if user_input is not None:
             # Validate that the selected sensor is really a temperature entity.
@@ -211,7 +211,7 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    def _async_get_temperature_entities(self) -> list[str]:
+    def _get_temperature_entities(self) -> list[str]:
         # Filter sensor entities by device_class or unit_of_measurement.
         registry = er.async_get(self.hass)
         registry_entries = {
