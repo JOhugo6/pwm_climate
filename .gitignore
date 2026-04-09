@@ -160,12 +160,13 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-/.idea/copilot.data.migration.agent.xml
-/.idea/copilot.data.migration.ask2agent.xml
-/.idea/copilot.data.migration.edit.xml
-/.idea/encodings.xml
-/.idea/indexLayout.xml
-/.idea/projectSettingsUpdater.xml
-/.idea/vcs.xml
-/.idea/workspace.xml
-/.idea/misc.xml
+/.idea
+/.playwright-mcp
+AGENTS.md
+CLAUDE.md
+/docs
+/docker
+/scripts
+/tests
+.env.example
+docker-compose.yml
