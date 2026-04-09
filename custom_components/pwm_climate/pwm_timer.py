@@ -6,8 +6,21 @@ import asyncio
 import logging
 import math
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _PWMTimingSnapshot:
+    """Coherent timing snapshot consumed by the PWM loop."""
+
+    ratio: float
+    duty_percent: float
+    period_seconds: float
+    on_seconds: float
+    off_seconds: float
+    cycle_start: float
 
 
 class SoftwarePWMTimer:
@@ -30,13 +43,8 @@ class SoftwarePWMTimer:
         self._task: asyncio.Task | None = None
         self._update_event = asyncio.Event()
         self._enabled = False
-        self._ratio: float | None = None
-        self._duty_percent: float | None = None
-        self._period_seconds: float | None = None
-        self._on_seconds: float | None = None
-        self._off_seconds: float | None = None
+        self._timing_snapshot: _PWMTimingSnapshot | None = None
         self._phase: str | None = None
-        self._cycle_start: float | None = None
         self._output_mode: str | None = None
 
     def set_name(self, name: str | None) -> None:
@@ -57,13 +65,8 @@ class SoftwarePWMTimer:
 
         task = self._task
         self._task = None
-        self._ratio = None
-        self._duty_percent = None
-        self._period_seconds = None
-        self._on_seconds = None
-        self._off_seconds = None
+        self._timing_snapshot = None
         self._phase = None
-        self._cycle_start = None
         self._enabled = False
         task.cancel()
         try:
@@ -127,16 +130,17 @@ class SoftwarePWMTimer:
         same_period = False
         same_ratio = False
         if self._task is not None:
-            previous_ratio = self._ratio
-            same_period = self._period_seconds is not None and math.isclose(
-                self._period_seconds,
+            previous = self._timing_snapshot
+            previous_ratio = previous.ratio if previous is not None else None
+            same_period = previous is not None and math.isclose(
+                previous.period_seconds,
                 period_seconds,
                 rel_tol=0.0,
                 abs_tol=0.01,
             )
             same_ratio = (
-                self._ratio is not None
-                and math.isclose(self._ratio, duty_ratio, rel_tol=0.0, abs_tol=1e-6)
+                previous is not None
+                and math.isclose(previous.ratio, duty_ratio, rel_tol=0.0, abs_tol=1e-6)
             )
             if same_period and same_ratio and not force_restart:
                 return
@@ -160,19 +164,27 @@ class SoftwarePWMTimer:
         elif not same_period:
             restart_cause = "period_change"
 
-        self._enabled = True
-
-        self._ratio = duty_ratio
-        self._duty_percent = duty_percent
-        self._period_seconds = period_seconds
-        self._on_seconds = on_seconds
-        self._off_seconds = off_seconds
-
         if restart_cause is not None:
-            # Reset cycle start so the new duty cycle takes effect immediately.
-            self._cycle_start = asyncio.get_running_loop().time()
-            self._phase = None
+            cycle_start = asyncio.get_running_loop().time()
             _LOGGER.debug("Restarting PWM cycle for %s (reason=%s)", self._name, restart_cause)
+        else:
+            cycle_start = (
+                self._timing_snapshot.cycle_start
+                if self._timing_snapshot is not None
+                else asyncio.get_running_loop().time()
+            )
+
+        self._enabled = True
+        self._timing_snapshot = _PWMTimingSnapshot(
+            ratio=duty_ratio,
+            duty_percent=duty_percent,
+            period_seconds=period_seconds,
+            on_seconds=on_seconds,
+            off_seconds=off_seconds,
+            cycle_start=cycle_start,
+        )
+        if restart_cause is not None:
+            self._phase = None
 
         if self._task is None:
             # First-time start of the PWM loop.
@@ -208,21 +220,15 @@ class SoftwarePWMTimer:
         try:
             while self._enabled:
                 self._update_event.clear()
-                period_seconds = self._period_seconds
-                duty_percent = self._duty_percent
-                on_seconds = self._on_seconds
-                cycle_start = self._cycle_start
-
-                if (
-                    self._ratio is None
-                    or period_seconds is None
-                    or duty_percent is None
-                    or on_seconds is None
-                    or cycle_start is None
-                    or period_seconds <= 0.0
-                ):
+                timing = self._timing_snapshot
+                if timing is None or timing.period_seconds <= 0.0:
                     await self._update_event.wait()
                     continue
+
+                period_seconds = timing.period_seconds
+                duty_percent = timing.duty_percent
+                on_seconds = timing.on_seconds
+                cycle_start = timing.cycle_start
 
                 # Determine whether we are currently in the on or off phase.
                 now = loop.time()
@@ -294,7 +300,7 @@ class SoftwarePWMTimer:
         self._output_mode = mode
         self._enabled = False
         self._phase = None
-        self._cycle_start = None
+        self._timing_snapshot = None
         _LOGGER.debug(
             "PWM output stable %s for %s (power=%.1f%% reason=%s)",
             mode,
