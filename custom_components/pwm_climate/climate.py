@@ -121,6 +121,22 @@ def _resolve_default_preset(entry: ConfigEntry, presets: Mapping[str, float]) ->
     return next(iter(presets), DEFAULT_PRESET)
 
 
+def _resolve_output_entity_id(entry: ConfigEntry) -> str | None:
+    # Prefer the configured option value, then fall back to legacy entry data.
+    for candidate in (
+        entry.options.get(CONF_OUTPUT_ENTITY),
+        entry.data.get(CONF_OUTPUT_ENTITY),
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate
+
+    _LOGGER.error(
+        "Missing output entity for config entry %s; output control will be disabled",
+        entry.title,
+    )
+    return None
+
+
 def _extract_temperature_value(state: State | None) -> tuple[float | None, str | None]:
     # Normalize a temperature state to (float or None, error tag) for logging.
     if state is None:
@@ -201,10 +217,7 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             CONF_TEMPERATURE_ENTITY,
             self._config_entry.data.get(CONF_TEMPERATURE_ENTITY),
         )
-        self._output_entity_id = self._config_entry.options.get(CONF_OUTPUT_ENTITY)
-        if not self._output_entity_id:
-            # Output entity is required in the original config; keep fallback.
-            self._output_entity_id = self._config_entry.data[CONF_OUTPUT_ENTITY]
+        self._output_entity_id = _resolve_output_entity_id(self._config_entry)
         self._humidity_sensor_entity_id: str | None = self._config_entry.options.get(
             CONF_HUMIDITY_ENTITY,
             self._config_entry.data.get(CONF_HUMIDITY_ENTITY),

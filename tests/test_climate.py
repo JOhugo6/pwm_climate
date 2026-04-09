@@ -44,6 +44,22 @@ def _build_controller(*, humidity: float | None = 42.0) -> tuple[object, WriteRe
     return controller, recorder
 
 
+def _build_initialized_controller(
+    *,
+    data: dict[str, Any] | None = None,
+    options: dict[str, Any] | None = None,
+    title: str = "PWM Climate Controller",
+) -> climate.PWMClimateController:
+    hass = climate.HomeAssistant()
+    entry = climate.ConfigEntry(
+        entry_id="entry-id",
+        data=data,
+        options=options,
+        title=title,
+    )
+    return climate.PWMClimateController(hass, entry)
+
+
 def _build_regulation_controller() -> tuple[object, TaskTrackingHass, WriteRecorder]:
     controller = climate.PWMClimateController.__new__(climate.PWMClimateController)
     hass = TaskTrackingHass()
@@ -163,6 +179,48 @@ def test_async_humidity_changed_ignores_invalid_state() -> None:
 
     assert controller._attr_current_humidity == 48.0
     assert recorder.calls == 0
+
+
+def test_constructor_prefers_output_entity_from_options_over_data() -> None:
+    controller = _build_initialized_controller(
+        data={climate.CONF_OUTPUT_ENTITY: "switch.data_output"},
+        options={climate.CONF_OUTPUT_ENTITY: "switch.options_output"},
+        title="Study PWM",
+    )
+
+    assert controller._output_entity_id == "switch.options_output"
+    assert controller._output_adapter.supports_output is True
+
+
+def test_constructor_falls_back_to_output_entity_from_data_when_options_missing() -> None:
+    controller = _build_initialized_controller(
+        data={climate.CONF_OUTPUT_ENTITY: "switch.data_output"},
+        options={climate.CONF_OUTPUT_ENTITY: ""},
+        title="Study PWM",
+    )
+
+    assert controller._output_entity_id == "switch.data_output"
+    assert controller._output_adapter.supports_output is True
+
+
+def test_constructor_logs_and_disables_output_when_output_entity_is_missing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.ERROR, logger=climate.DOMAIN)
+
+    controller = _build_initialized_controller(
+        data={},
+        options={},
+        title="Study PWM",
+    )
+
+    assert controller._output_entity_id is None
+    assert controller._output_adapter.supports_output is False
+    assert any(
+        record.levelno == logging.ERROR
+        and "Missing output entity for config entry Study PWM" in record.getMessage()
+        for record in caplog.records
+    )
 
 
 def test_handle_regulation_input_change_coalesces_pending_updates_and_uses_latest_reason() -> None:
