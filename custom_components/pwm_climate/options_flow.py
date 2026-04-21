@@ -53,7 +53,7 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(
         self,
         user_input: dict[str, Any] | None = None,
-    ):
+    ) -> config_entries.ConfigFlowResult:
         if user_input is not None:
             # Save options as-is; validation is handled by selectors.
             return self.async_create_entry(title="", data=user_input)
