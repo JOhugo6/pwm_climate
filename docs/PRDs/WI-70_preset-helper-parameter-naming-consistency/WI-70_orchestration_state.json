@@ -1,0 +1,78 @@
+{
+  "feature_id": "WI-70",
+  "role": "PROCESS_COORDINATOR",
+  "updated_at": "2026-04-21T13:17:11.5720200+02:00",
+  "process_status": "READY_FOR_FINAL",
+  "selected_prd_folder": "docs/PRDs/WI-70_preset-helper-parameter-naming-consistency",
+  "selected_prd_path": "docs/PRDs/WI-70_preset-helper-parameter-naming-consistency/WI-70_Implementation_Assignment.md",
+  "dispatch_mode": "SUB_AGENT",
+  "active_dispatch": null,
+  "phase_gates": {
+    "gate_1_prd_readiness": {
+      "status": "PASSED",
+      "basis": [
+        "Single active PRD folder identified at docs/PRDs/WI-70_preset-helper-parameter-naming-consistency.",
+        "WI-70_Implementation_Assignment.md exists and contains FR, AC, scope, and testing requirements."
+      ]
+    },
+    "gate_2_engineering_to_review": {
+      "status": "PASSED",
+      "basis": [
+        "Implementation exists in custom_components/pwm_climate/preset_helpers.py with focused regression coverage in tests/test_preset_helpers.py.",
+        "WI-70_TraceMatrix.md exists and is populated for all FR and AC rows in a post-SE / pre-QA state.",
+        "SE validation reported focused repo-local pytest passing and a clean Docker restart smoke check."
+      ]
+    },
+    "gate_3_review_to_qa": {
+      "status": "PASSED",
+      "basis": [
+        "WI-70_CR-01_20260421.md exists.",
+        "Latest CR decision is APPROVED.",
+        "WI-70_TraceMatrix.md links WI-70_CR-01_20260421.md in both latest CR reference fields."
+      ]
+    },
+    "gate_4_qa_to_final": {
+      "status": "PASSED",
+      "basis": [
+        "WI-70_TR-01_20260421.md exists and reports COMPLETE.",
+        "WI-70_TraceMatrix.md section 8 is marked COMPLETE.",
+        "QA evidence includes repo-local pytest for preset-helper and related regression coverage plus Docker smoke validation with Home Assistant responding on http://127.0.0.1:8124."
+      ]
+    }
+  },
+  "dispatch_history": [
+    {
+      "role": "SUPPORT",
+      "agent_id": "019dafbb-306f-7f21-a190-66110008aea9",
+      "nickname": "Faraday",
+      "status": "COMPLETED",
+      "summary": "Preflighted the repo venv and Docker smoke prerequisites; both were ready with Home Assistant responding on http://127.0.0.1:8124."
+    },
+    {
+      "role": "SE",
+      "agent_id": "019dafba-1e14-7922-8f7c-dbec21e9f7de",
+      "nickname": "Planck",
+      "status": "COMPLETED",
+      "summary": "Completed the WI-70 naming cleanup, added focused preset-helper regression tests, initialized WI-70_TraceMatrix.md, and reported passing repo-local pytest plus clean Docker restart smoke evidence."
+    },
+    {
+      "role": "CR",
+      "agent_id": "019dafbe-0fc3-78c1-983d-e44268cd4b27",
+      "nickname": "Ramanujan",
+      "status": "APPROVED",
+      "summary": "Approved the WI-70 implementation and traceability state in WI-70_CR-01_20260421.md."
+    },
+    {
+      "role": "QA",
+      "agent_id": "019dafbf-cbcb-7d70-bdd4-5d72c9c2df28",
+      "nickname": "Plato",
+      "status": "COMPLETE",
+      "summary": "Published WI-70_TR-01_20260421.md, updated WI-70_TraceMatrix.md to COMPLETE, passed repo-local pytest, and passed Docker smoke validation."
+    }
+  ],
+  "blockers": [],
+  "mandatory_next_transition": {
+    "next_state": "FINAL",
+    "rule": "All mandatory gates passed and the latest QA cycle is COMPLETE."
+  }
+}

@@ -57,16 +57,16 @@ def _apply_flat_preset_temperatures(
 
 def _merge_preset_temperatures(
     base: dict[int, float],
-    raw: Mapping[Any, Any] | None,
+    source: Mapping[Any, Any] | None,
 ) -> dict[int, float]:
     # Merge nested "hvac_modes" style dictionaries into the base map.
-    if not isinstance(raw, Mapping):
+    if not isinstance(source, Mapping):
         return base
 
     # Build label -> id lookup so we can accept both ids and labels.
     label_to_id = {label: preset_id for preset_id, label in PRESET_LABELS.items()}
 
-    for key, value in raw.items():
+    for key, value in source.items():
         preset_id: int | None = None
         if isinstance(key, str) and key in label_to_id:
             preset_id = label_to_id[key]
