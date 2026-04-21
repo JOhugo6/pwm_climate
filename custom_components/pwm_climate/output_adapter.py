@@ -125,34 +125,56 @@ class PWMOutputAdapter:
         return max(0.0, min(100.0, percent))
 
     async def _async_set_binary_output(self, is_on: bool) -> None:
-        # Avoid redundant service calls for binary entities.
-        if self._last_state is not None and self._last_state == is_on:
-            return
-        service = "turn_on" if is_on else "turn_off"
-        if await self._async_call_service(
-            self._domain or "switch",
-            service,
-            {"entity_id": self._entity_id},
-        ):
-            self._last_state = is_on
-            self._last_value = None
+        await self._async_set_output_value(
+            current_value=self._last_state,
+            new_value=is_on,
+            is_unchanged=lambda current, new: current == new,
+            domain=self._domain or "switch",
+            service="turn_on" if is_on else "turn_off",
+            data={"entity_id": self._entity_id},
+            update_cache=self._set_binary_output_cache,
+        )
 
     async def _async_set_number_output(self, percent: float) -> None:
-        # Avoid redundant service calls for numeric entities.
-        if self._last_value is not None and math.isclose(
-            self._last_value,
-            percent,
-            rel_tol=0.0,
-            abs_tol=1e-6,
-        ):
+        await self._async_set_output_value(
+            current_value=self._last_value,
+            new_value=percent,
+            is_unchanged=lambda current, new: math.isclose(
+                current,
+                new,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            ),
+            domain=self._domain or "number",
+            service="set_value",
+            data={"entity_id": self._entity_id, "value": percent},
+            update_cache=self._set_number_output_cache,
+        )
+
+    async def _async_set_output_value(
+        self,
+        *,
+        current_value: float | bool | None,
+        new_value: float | bool,
+        is_unchanged: Callable[[float | bool, float | bool], bool],
+        domain: str,
+        service: str,
+        data: dict[str, Any],
+        update_cache: Callable[[float | bool], None],
+    ) -> None:
+        # Shared write path for binary and numeric outputs.
+        if current_value is not None and is_unchanged(current_value, new_value):
             return
-        if await self._async_call_service(
-            self._domain or "number",
-            "set_value",
-            {"entity_id": self._entity_id, "value": percent},
-        ):
-            self._last_value = percent
-            self._last_state = None
+        if await self._async_call_service(domain, service, data):
+            update_cache(new_value)
+
+    def _set_binary_output_cache(self, is_on: bool) -> None:
+        self._last_state = is_on
+        self._last_value = None
+
+    def _set_number_output_cache(self, percent: float) -> None:
+        self._last_value = percent
+        self._last_state = None
 
     async def _async_set_climate_output(self, is_on: bool) -> None:
         # Climate output is driven by setpoint temperature when "on".

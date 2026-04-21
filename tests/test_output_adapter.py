@@ -246,6 +246,43 @@ CALLER_SCENARIOS: tuple[CallerScenario, ...] = (
 )
 
 
+@pytest.mark.parametrize(
+    ("scenario", "expected_last_state", "expected_last_value"),
+    [
+        pytest.param(
+            CALLER_SCENARIOS[0],
+            True,
+            4.2,
+            id="binary",
+        ),
+        pytest.param(
+            CALLER_SCENARIOS[1],
+            False,
+            37.5,
+            id="number",
+        ),
+    ],
+)
+def test_redundant_binary_and_number_writes_are_skipped_by_shared_output_path(
+    scenario: CallerScenario,
+    expected_last_state: bool,
+    expected_last_value: float,
+) -> None:
+    adapter, services = _build_adapter(
+        scenario.entity_id,
+        _complete_call,
+        temperature_provider=scenario.temperature_provider,
+    )
+    adapter._last_state = expected_last_state
+    adapter._last_value = expected_last_value
+
+    _run(scenario.invoke(adapter))
+
+    assert services.calls == []
+    assert adapter._last_state is expected_last_state
+    assert adapter._last_value == expected_last_value
+
+
 def test_async_call_service_returns_true_when_service_completes() -> None:
     adapter, services = _build_adapter("switch.study", _complete_call)
 
