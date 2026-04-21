@@ -154,19 +154,25 @@ class SoftwarePWMTimer:
                     duty_ratio * 100.0,
                 )
 
+        is_initial_start = self._task is None
         restart_cause: str | None = None
         if force_restart:
             restart_cause = restart_reason or "force_restart"
-        elif self._task is None:
-            restart_cause = "start"
-        elif not same_ratio:
+        elif not is_initial_start and not same_ratio:
             restart_cause = "duty_change"
-        elif not same_period:
+        elif not is_initial_start and not same_period:
             restart_cause = "period_change"
 
-        if restart_cause is not None:
+        should_log_restart = restart_cause is not None and not is_initial_start
+
+        if is_initial_start or restart_cause is not None:
             cycle_start = asyncio.get_running_loop().time()
-            _LOGGER.debug("Restarting PWM cycle for %s (reason=%s)", self._name, restart_cause)
+            if should_log_restart:
+                _LOGGER.debug(
+                    "Restarting PWM cycle for %s (reason=%s)",
+                    self._name,
+                    restart_cause,
+                )
         else:
             cycle_start = (
                 self._timing_snapshot.cycle_start
@@ -188,10 +194,8 @@ class SoftwarePWMTimer:
 
         if self._task is None:
             # First-time start of the PWM loop.
-            _LOGGER.info("Starting PWM for %s", self._name)
-            _LOGGER.debug("Starting PWM cycle for %s", self._name)
-            _LOGGER.debug(
-                "PWM start for %s (period=%.1fs duty=%.1f%% on=%.1fs off=%.1fs)",
+            _LOGGER.info(
+                "Starting PWM for %s (period=%.1fs duty=%.1f%% on=%.1fs off=%.1fs)",
                 self._name,
                 period_seconds,
                 duty_ratio * 100.0,

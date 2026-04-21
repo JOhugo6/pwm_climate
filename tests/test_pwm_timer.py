@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import logging
 from collections.abc import Coroutine
 from dataclasses import dataclass
 from typing import Any, TypeVar
@@ -107,6 +108,45 @@ def test_apply_period_change_and_force_restart_keep_snapshot_coherent() -> None:
         assert timer._update_event.is_set()
 
     _run(scenario())
+
+
+@pytest.mark.parametrize("force_restart", [False, True], ids=["initial", "initial-force-restart"])
+def test_apply_initial_start_emits_single_start_record(
+    force_restart: bool,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger=pwm_timer.__name__)
+
+    async def scenario() -> None:
+        timer = pwm_timer.SoftwarePWMTimer(
+            set_output=_noop_output,
+            name="Study PWM",
+            create_task=_dummy_create_task,
+        )
+        await timer.apply(
+            period_seconds=12.0,
+            duty_ratio=0.25,
+            force_restart=force_restart,
+            restart_reason="startup",
+        )
+
+    _run(scenario())
+
+    start_records = [
+        record
+        for record in caplog.records
+        if "Study PWM" in record.getMessage()
+        and any(token in record.getMessage().lower() for token in ("start", "restart"))
+    ]
+
+    assert len(start_records) == 1
+    assert start_records[0].levelno == logging.INFO
+    start_message = start_records[0].getMessage()
+    assert "period=" in start_message
+    assert "duty=" in start_message
+    assert "on=" in start_message
+    assert "off=" in start_message
+    assert not any("Restarting PWM cycle" in record.getMessage() for record in caplog.records)
 
 
 def test_pwm_loop_uses_single_snapshot_per_iteration() -> None:
