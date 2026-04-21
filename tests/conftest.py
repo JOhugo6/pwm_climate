@@ -167,6 +167,7 @@ def _install_homeassistant_stubs() -> None:
     helpers_module = types.ModuleType("homeassistant.helpers")
     helpers_module.__path__ = []  # type: ignore[attr-defined]
 
+    entity_module = types.ModuleType("homeassistant.helpers.entity")
     entity_platform_module = types.ModuleType("homeassistant.helpers.entity_platform")
     entity_platform_module.AddEntitiesCallback = Any
 
@@ -188,6 +189,22 @@ def _install_homeassistant_stubs() -> None:
         return registry
 
     entity_registry_module.async_get = async_get
+
+    class DeviceInfo:
+        """Minimal DeviceInfo stub for entity metadata tests."""
+
+        def __init__(
+            self,
+            *,
+            identifiers: set[tuple[str, str]] | None = None,
+            manufacturer: str | None = None,
+            model: str | None = None,
+            name: str | None = None,
+        ) -> None:
+            self.identifiers = set() if identifiers is None else identifiers
+            self.manufacturer = manufacturer
+            self.model = model
+            self.name = name
 
     selector_module = types.ModuleType("homeassistant.helpers.selector")
 
@@ -256,6 +273,14 @@ def _install_homeassistant_stubs() -> None:
     class ClimateEntity:
         """Minimal ClimateEntity stub for module imports."""
 
+        @property
+        def device_info(self) -> Any:
+            return getattr(self, "_attr_device_info", None)
+
+        @property
+        def unique_id(self) -> Any:
+            return getattr(self, "_attr_unique_id", None)
+
     class ClimateEntityFeature(IntFlag):
         TARGET_TEMPERATURE = 1
         TURN_ON = 2
@@ -278,7 +303,9 @@ def _install_homeassistant_stubs() -> None:
     components_module.climate = climate_module
     components_module.sensor = sensor_module
     climate_module.const = climate_const_module
+    entity_module.DeviceInfo = DeviceInfo
     helpers_module.entity_platform = entity_platform_module
+    helpers_module.entity = entity_module
     helpers_module.event = event_module
     helpers_module.entity_registry = entity_registry_module
     helpers_module.selector = selector_module
@@ -294,6 +321,7 @@ def _install_homeassistant_stubs() -> None:
     sys.modules["homeassistant.exceptions"] = exceptions_module
     sys.modules["homeassistant.config_entries"] = config_entries_module
     sys.modules["homeassistant.helpers"] = helpers_module
+    sys.modules["homeassistant.helpers.entity"] = entity_module
     sys.modules["homeassistant.helpers.entity_platform"] = entity_platform_module
     sys.modules["homeassistant.helpers.event"] = event_module
     sys.modules["homeassistant.helpers.entity_registry"] = entity_registry_module

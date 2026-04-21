@@ -52,13 +52,14 @@ def _build_controller(*, humidity: float | None = 42.0) -> tuple[object, WriteRe
 
 def _build_initialized_controller(
     *,
+    entry_id: str = "entry-id",
     data: dict[str, Any] | None = None,
     options: dict[str, Any] | None = None,
     title: str = "PWM Climate Controller",
 ) -> climate.PWMClimateController:
     hass = climate.HomeAssistant()
     entry = climate.ConfigEntry(
-        entry_id="entry-id",
+        entry_id=entry_id,
         data=data,
         options=options,
         title=title,
@@ -233,6 +234,46 @@ def test_constructor_logs_and_disables_output_when_output_entity_is_missing(
         and "Missing output entity for config entry Study PWM" in record.getMessage()
         for record in caplog.records
     )
+
+
+def test_constructor_exposes_device_info_with_stable_identifiers() -> None:
+    controller = _build_initialized_controller(
+        data={climate.CONF_NAME: "Study PWM"},
+        title="PWM Climate Controller",
+    )
+
+    device_info = controller.device_info
+
+    assert isinstance(device_info, climate.DeviceInfo)
+    assert device_info.identifiers == {(climate.DOMAIN, "entry-id")}
+    assert device_info.name == "Study PWM"
+
+
+def test_constructor_uses_same_device_identifiers_for_same_entry_id() -> None:
+    controller_a = _build_initialized_controller(
+        entry_id="entry-id",
+        data={climate.CONF_NAME: "Study PWM"},
+        title="PWM Climate Controller",
+    )
+    controller_b = _build_initialized_controller(
+        entry_id="entry-id",
+        data={climate.CONF_NAME: "Study PWM"},
+        title="Renamed PWM Climate Controller",
+    )
+
+    assert controller_a.device_info.identifiers == controller_b.device_info.identifiers
+    assert controller_a.device_info.identifiers == {(climate.DOMAIN, "entry-id")}
+
+
+def test_constructor_preserves_unique_id_continuity_with_device_info() -> None:
+    controller = _build_initialized_controller(
+        entry_id="entry-id",
+        data={climate.CONF_NAME: "Study PWM"},
+    )
+
+    assert controller.unique_id == "entry-id"
+    assert controller._attr_unique_id == "entry-id"
+    assert controller.device_info.identifiers == {(climate.DOMAIN, "entry-id")}
 
 
 def test_async_restore_state_resets_to_defaults_when_last_state_lookup_fails(

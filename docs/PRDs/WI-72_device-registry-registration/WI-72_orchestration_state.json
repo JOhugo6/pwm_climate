@@ -1,0 +1,113 @@
+{
+  "feature_id": "WI-72",
+  "role": "PROCESS_COORDINATOR",
+  "updated_at": "2026-04-21T05:41:03.2806038+02:00",
+  "process_status": "READY_FOR_FINAL",
+  "selected_prd_folder": "docs/PRDs/WI-72_device-registry-registration",
+  "selected_prd_path": "docs/PRDs/WI-72_device-registry-registration/WI-72_Implementation_Assignment.md",
+  "dispatch_mode": "SUB_AGENT",
+  "active_dispatch": null,
+  "phase_gates": {
+    "gate_1_prd_readiness": {
+      "status": "PASSED",
+      "basis": [
+        "Single active PRD folder identified at docs/PRDs/WI-72_device-registry-registration.",
+        "WI-72_Implementation_Assignment.md exists and contains FR, AC, scope, and testing requirements."
+      ]
+    },
+    "gate_2_engineering_to_review": {
+      "status": "PASSED",
+      "basis": [
+        "Implementation exists in custom_components/pwm_climate/climate.py with supporting test changes in tests/test_climate.py and tests/conftest.py.",
+        "WI-72_TraceMatrix.md exists and is populated for all FR and AC rows.",
+        "SE validation reported .venv\\Scripts\\python.exe -m pytest tests/test_climate.py -q passing."
+      ]
+    },
+    "gate_3_review_to_qa": {
+      "status": "PASSED",
+      "basis": [
+        "WI-72_CR-04_20260421.md exists.",
+        "Latest CR decision is APPROVED.",
+        "WI-72_TraceMatrix.md links the approved CR artifact in both latest CR reference fields."
+      ]
+    },
+    "gate_4_qa_to_final": {
+      "status": "PASSED",
+      "basis": [
+        "WI-72_TR-01_20260421.md exists and reports COMPLETE.",
+        "WI-72_TraceMatrix.md section 8 is marked COMPLETE.",
+        "QA evidence includes repo-local pytest, config-flow regression coverage, and Docker smoke validation with HTTP 200 plus pwm_climate device/entity registry evidence."
+      ]
+    }
+  },
+  "dispatch_history": [
+    {
+      "role": "SE",
+      "agent_id": "019dae0d-de33-73e2-bfd8-3efb2797fad2",
+      "nickname": "Hilbert",
+      "status": "PARTIAL_IMPLEMENTATION_OBSERVED",
+      "summary": "Initial SE dispatch started WI-72 implementation and left partial worktree updates before the dispatch was closed."
+    },
+    {
+      "role": "SE",
+      "agent_id": "019dae12-b753-7261-984a-5e7e1eeb97d4",
+      "nickname": "Euler",
+      "status": "COMPLETED",
+      "summary": "Completed DeviceInfo implementation, climate tests, and initial WI-72 traceability artifact creation."
+    },
+    {
+      "role": "CR",
+      "agent_id": "019dae15-3018-7381-b816-574007002823",
+      "nickname": "McClintock",
+      "status": "CHANGES_REQUIRED",
+      "summary": "Rejected the initial matrix because tested rows lacked a formal TR link and included stale WI-61-specific smoke evidence."
+    },
+    {
+      "role": "SE",
+      "agent_id": "019dae16-ce04-7ad1-a0c7-2443bd33e763",
+      "nickname": "Einstein",
+      "status": "TRACEABILITY_REWORK_OBSERVED",
+      "summary": "Adjusted WI-72_TraceMatrix.md into an explicit post-SE/pre-QA state."
+    },
+    {
+      "role": "CR",
+      "agent_id": "019dae18-932e-7922-97c2-915ee12450b1",
+      "nickname": "Meitner",
+      "status": "CHANGES_REQUIRED",
+      "summary": "Required a narrower placeholder fix so row-level traceability clearly reflected not-tested-yet status."
+    },
+    {
+      "role": "SE",
+      "agent_id": "019dae1a-b8d8-7fb1-b816-5dddbfa0f51e",
+      "nickname": "Poincare",
+      "status": "TRACEABILITY_PLACEHOLDER_REWORK_COMPLETED",
+      "summary": "Updated FR and AC placeholder wording in WI-72_TraceMatrix.md to match pre-QA semantics."
+    },
+    {
+      "role": "SE",
+      "agent_id": "019dae1b-4c03-7160-a270-15b6b86c7436",
+      "nickname": "Hooke",
+      "status": "TRACEABILITY_AC_REWORK_COMPLETED",
+      "summary": "Finalized AC Test Report File placeholders for the pre-QA matrix state."
+    },
+    {
+      "role": "CR",
+      "agent_id": "019dae1c-baf5-7b60-b373-bec6b03f6acc",
+      "nickname": "Bernoulli",
+      "status": "APPROVED",
+      "summary": "Approved the final WI-72 implementation and traceability state in WI-72_CR-04_20260421.md."
+    },
+    {
+      "role": "QA",
+      "agent_id": "019dae1d-ae9d-70e3-8f31-0e8c48feecd8",
+      "nickname": "Godel",
+      "status": "COMPLETE",
+      "summary": "Published WI-72_TR-01_20260421.md, executed repo-local pytest and Docker smoke validation, and updated WI-72_TraceMatrix.md to COMPLETE."
+    }
+  ],
+  "blockers": [],
+  "mandatory_next_transition": {
+    "next_state": "FINAL",
+    "rule": "All mandatory gates passed and the latest QA cycle is COMPLETE."
+  }
+}

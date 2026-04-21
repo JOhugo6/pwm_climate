@@ -18,6 +18,7 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.core import Event, HomeAssistant, State, callback
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -211,6 +212,10 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         # Core entity metadata exposed to Home Assistant.
         self._attr_unique_id = self._config_entry.entry_id
         self._attr_name = self._config_entry.data.get(CONF_NAME, self._config_entry.title)
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._config_entry.entry_id)},
+            name=self._attr_name,
+        )
 
         # Options override initial entry data for the sensor/entity bindings.
         self._temperature_entity_id: str | None = self._config_entry.options.get(
