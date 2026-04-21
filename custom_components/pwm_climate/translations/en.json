@@ -9,6 +9,7 @@
           "temperature_entity": "Temperature sensor entity",
           "humidity_entity": "Humidity sensor entity (optional)",
           "output_entity": "Output entity (percentage)",
+          "default_preset": "Default preset",
 
           "min_temperature": "Minimum temperature",
           "max_temperature": "Maximum temperature",
@@ -33,6 +34,7 @@
       "init": {
         "title": "PWM climate controller settings",
         "data": {
+          "default_preset": "Default preset",
           "min_temperature": "Minimum temperature",
           "max_temperature": "Maximum temperature",
           "temperature_step": "Temperature step",

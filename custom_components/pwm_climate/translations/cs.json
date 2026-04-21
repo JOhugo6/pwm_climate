@@ -9,6 +9,7 @@
           "temperature_entity": "Entita teplotního senzoru",
           "humidity_entity": "Entita senzoru vlhkosti (volitelné)",
           "output_entity": "Výstupní entita (procenta)",
+          "default_preset": "V\u00fdchoz\u00ed preset",
           "min_temperature": "Minimální teplota",
           "max_temperature": "Maximální teplota",
           "temperature_step": "Teplotní krok",
@@ -29,6 +30,7 @@
       "init": {
         "title": "Nastavení PWM termostatu",
         "data": {
+          "default_preset": "V\u00fdchoz\u00ed preset",
           "min_temperature": "Minimální teplota",
           "max_temperature": "Maximální teplota",
           "temperature_step": "Teplotní krok",

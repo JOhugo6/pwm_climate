@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 config_flow = importlib.import_module("custom_components.pwm_climate.config_flow")
+TRANSLATIONS_DIR = Path(__file__).resolve().parents[1] / "custom_components" / "pwm_climate" / "translations"
 
 
 @dataclass(slots=True)
@@ -55,6 +58,10 @@ def _build_flow(*, entries: dict[str, RegistryEntry], states: list[State]) -> co
 
 def _run(coro: Any) -> Any:
     return asyncio.run(coro)
+
+
+def _load_translation(language: str) -> dict[str, Any]:
+    return json.loads((TRANSLATIONS_DIR / f"{language}.json").read_text(encoding="utf-8-sig"))
 
 
 def test_get_temperature_entities_discovers_registry_and_state_matches() -> None:
@@ -152,3 +159,18 @@ def test_async_step_user_rejects_invalid_temperature_entity() -> None:
         assert result["errors"][config_flow.CONF_TEMPERATURE_ENTITY] == "invalid_temperature_entity"
 
     _run(scenario())
+
+
+@pytest.mark.parametrize("language", ["en", "cs"])
+def test_translation_files_are_valid_json(language: str) -> None:
+    translation = _load_translation(language)
+
+    assert isinstance(translation, dict)
+
+
+@pytest.mark.parametrize("language", ["en", "cs"])
+def test_default_preset_translation_keys_exist(language: str) -> None:
+    translation = _load_translation(language)
+
+    assert translation["config"]["step"]["user"]["data"]["default_preset"]
+    assert translation["options"]["step"]["init"]["data"]["default_preset"]
