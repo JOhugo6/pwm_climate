@@ -1,52 +1,73 @@
-# PWM Climate Controller - Home Assistant Custom Integration
+# PWM Climate Controller
 
-PWM Climate Controller is a proportional PWM-based climate controller designed primarily for hydronic floor heating systems.
+This directory contains the Home Assistant custom integration for
+`pwm_climate`. The integration creates a climate entity that calculates
+proportional heat demand and applies it through software PWM or a numeric output
+value.
 
-## Control Algorithm
-This integration uses proportional (P) control with PWM output.
+For the full project documentation, see the repository [README](../../README.md).
 
-## Features
-- Climate entity compatible with Home Assistant UI
-- Proportional control based on current vs target temperature
-- PWM output for on/off actuators (relays, thermal actuators, KNX outputs)
-- Optional humidity sensor display
-- Configurable min/max temperature, step, and PWM period (seconds)
-- Preset temperatures per HVAC mode
-- Fully async execution
+## Quick Reference
 
-## Installation
-### Manual
-1. Copy `custom_components/pwm_climate` into `<config>/custom_components/`.
-2. Restart Home Assistant.
-3. Add the integration in UI: Settings -> Devices & Services -> Add Integration -> PWM Climate Controller.
+| Item | Value |
+| --- | --- |
+| Domain | `pwm_climate` |
+| Platform | `climate` |
+| Setup | UI config flow |
+| Minimum Home Assistant | `2024.1.0` |
+| Manifest version | `0.1.1` |
+| License | Apache License 2.0 |
+
+## Supported Output Entities
+
+| Domain | Behavior |
+| --- | --- |
+| `switch`, `input_boolean`, `light` | Turned on/off according to the PWM phase. |
+| `number`, `input_number` | Receives the calculated duty cycle percentage with `set_value`. |
+| `climate` | Gets the controller target temperature while on and is turned off while off. |
 
 ## Configuration
-This integration uses Config Flow; no YAML is required.
 
-### Required
+Add the integration from Settings -> Devices & services -> Add integration ->
+PWM Climate Controller.
+
+Required setup fields:
+
 - Name
 - Temperature sensor entity
-- Output entity (`number`, `switch`, `light`, or `climate`)
+- Output entity
+- Default preset
+- Proportional gain (`Kp`)
 
-### Optional
+Optional setup fields:
+
 - Humidity sensor entity
-- Min/Max temperature
-- Temperature step
-- PWM period (seconds)
-- Preset temperatures per HVAC mode
+- Min/max target temperature
+- Target temperature step
+- PWM period in seconds
+- Target temperature per preset
 
-## Control Notes
-- Humidity is display-only and does not affect control.
-- The output entity is driven by PWM duty cycle.
+The options flow lets you update tuning values and preset temperatures after
+setup. YAML configuration is not required.
 
-## Breaking Changes
-This release renames the integration domain to `pwm_climate`.
-To preserve existing config entries and entity IDs, update Home Assistant storage before restarting:
-1. Stop Home Assistant.
-2. Back up the `.storage` directory.
-3. In `.storage/core.config_entries`, locate entries that contain `temperature_entity`, `output_entity`, and `pwm_period`, then set their `domain` to `pwm_climate`.
-4. In `.storage/core.entity_registry`, locate entities with the same `config_entry_id` and set their `platform` to `pwm_climate`.
-5. Start Home Assistant.
+## Control Summary
 
-## License
-MIT License
+The controller calculates demand with:
+
+```text
+output = clamp(Kp * (target_temperature - current_temperature), 0, 100)
+```
+
+That output becomes the PWM duty cycle. HVAC `off`, missing current
+temperature, and the `Ochrana budovy` no-heat preset force the output to `0 %`.
+Manual target temperature changes switch the entity to the internal `manual`
+preset state until another preset is selected.
+
+## Debug Logging
+
+```yaml
+logger:
+  default: warning
+  logs:
+    custom_components.pwm_climate: debug
+```
