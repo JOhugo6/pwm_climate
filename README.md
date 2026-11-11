@@ -15,9 +15,9 @@ then applies that demand through a software PWM timer or a numeric output value.
 | Integration domain | `pwm_climate` |
 | Platform | `climate` |
 | Setup method | Home Assistant UI config flow |
-| Options flow | Yes, for tuning and preset temperatures |
+| Options flow | Yes, for measurement sources, tuning and preset temperatures |
 | Minimum Home Assistant version | `2024.1.0` |
-| Current manifest version | `0.1.1` |
+| Current manifest version | `0.1.2` |
 | I/O class | `local_polling` |
 | License | Apache License 2.0 |
 
@@ -78,16 +78,31 @@ The integration is configured from the Home Assistant UI.
 
 | Field | Default | Notes |
 | --- | --- | --- |
-| Humidity sensor entity | unset | Display-only current humidity attribute. |
+| Humidity sensor entity | unset | Display-only current humidity. Sensor with humidity device class or classless % unit. |
 | Minimum temperature | `20.0` | Lower target temperature limit shown in the UI. |
 | Maximum temperature | `28.0` | Upper target temperature limit shown in the UI. |
 | Temperature step | `0.1` | Target temperature step shown in the UI. |
 | PWM period | `900` seconds | Length of one PWM cycle. Runtime minimum is 1 second. |
 | Preset temperatures | see below | Each preset has its own configurable target. |
 
-Options can be changed later from the integration options page. Current options
-cover the default preset, min/max temperature, target step, `Kp`, PWM period,
-and preset target temperatures.
+From Settings -> Devices & services -> PWM Climate Controller -> Configure,
+change the temperature source and optional humidity source independently, along
+with the default preset, min/max temperature, target step, `Kp`, PWM period and
+preset target temperatures. Clear the humidity field to remove its source; it
+stays removed after restart even if the original setup included humidity.
+
+Saving applies the settings immediately through the existing entry update
+listener; changing sources does not require deleting the climate entity or
+restarting Home Assistant. The entity ID, output, other saved options and manual
+target/HVAC mode remain in place. A new source is read immediately, and events
+from the previous source are ignored. Missing or invalid temperature at the time
+of switching clears the reading and forces zero heat demand. Missing or invalid
+humidity at the time of switching clears the displayed humidity. Humidity remains
+display-only.
+
+Existing humidity sources selected by older releases remain usable while the
+source still exists as a sensor, even without humidity metadata. New choices
+are limited to humidity measurements.
 
 ## Presets
 
@@ -201,5 +216,5 @@ Run the test suite from the repository root:
 python -m pytest
 ```
 
-Install `pytest` first if it is not available in your active Python
+Install `pytest` and `voluptuous` first if it is not available in your active Python
 environment.

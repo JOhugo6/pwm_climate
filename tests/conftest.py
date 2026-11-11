@@ -11,10 +11,11 @@ except ModuleNotFoundError:
     vol = types.ModuleType("voluptuous")
 
     class _Marker:
-        def __init__(self, kind: str, key: Any, default: Any = None) -> None:
+        def __init__(self, kind: str, key: Any, default: Any = None, description: Any = None) -> None:
             self.kind = kind
             self.key = key
             self.default = default
+            self.description = description
 
         def __hash__(self) -> int:
             return hash((self.kind, self.key, self.default))
@@ -28,11 +29,11 @@ except ModuleNotFoundError:
                 and self.default == other.default
             )
 
-    def Required(key: Any, default: Any = None) -> _Marker:
-        return _Marker("required", key, default)
+    def Required(key: Any, default: Any = None, description: Any = None) -> _Marker:
+        return _Marker("required", key, default, description)
 
-    def Optional(key: Any, default: Any = None) -> _Marker:
-        return _Marker("optional", key, default)
+    def Optional(key: Any, default: Any = None, description: Any = None) -> _Marker:
+        return _Marker("optional", key, default, description)
 
     def Coerce(type_: Any) -> Any:
         return type_
@@ -215,6 +216,11 @@ def _install_homeassistant_stubs() -> None:
     class _Selector:
         def __init__(self, config: Any) -> None:
             self.config = config
+
+        def __call__(self, value: Any) -> Any:
+            # Real Voluptuous compiles selectors as callable validators. These
+            # remain HA stubs; tests of omission/defaults use real Voluptuous.
+            return value
 
     class EntitySelectorConfig(_SelectorConfig):
         pass

@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
 from .const import (
-    DOMAIN,
+    CONF_TEMPERATURE_ENTITY,
+    CONF_HUMIDITY_ENTITY,
+    CONF_HVAC_MODES,
 
     # PWM / climate params
     CONF_MIN_TEMPERATURE,
@@ -30,6 +34,7 @@ from .const import (
     PRESET_NAMES,
 )
 from .preset_helpers import resolve_preset_temperatures
+from .source_helpers import measurement_entities
 
 
 class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
@@ -46,6 +51,10 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
             value = self.entry.data.get(key, default)
         return default if value is None else value
 
+    def _get_source_value(self, key: str) -> Any:
+        # An explicit None overrides entry.data for a removed optional source.
+        return self.entry.options.get(key, self.entry.data.get(key))
+
     def _build_preset_defaults(self) -> dict[int, float]:
         # Build the active preset map by overlaying entry data and options.
         return resolve_preset_temperatures(self.entry.data, self.entry.options)
@@ -54,9 +63,54 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
         self,
         user_input: dict[str, Any] | None = None,
     ) -> config_entries.ConfigFlowResult:
+        errors: dict[str, str] = {}
+        temperature_entities = measurement_entities(self.hass, "temperature", "°C")
+        humidity_entities = measurement_entities(self.hass, "humidity", "%")
+        # Older setup accepted any sensor for display-only humidity. Keep that
+        # effective source editable without accepting new incompatible sources.
+        existing_humidity = self._get_source_value(CONF_HUMIDITY_ENTITY)
+        if (
+            isinstance(existing_humidity, str)
+            and existing_humidity.startswith("sensor.")
+            and existing_humidity not in humidity_entities
+        ):
+            registry = er.async_get(self.hass)
+            if existing_humidity in registry.entities or self.hass.states.get(existing_humidity) is not None:
+                humidity_entities = sorted([*humidity_entities, existing_humidity])
         if user_input is not None:
-            # Save options as-is; validation is handled by selectors.
-            return self.async_create_entry(title="", data=user_input)
+            if user_input.get(CONF_TEMPERATURE_ENTITY) not in temperature_entities:
+                errors[CONF_TEMPERATURE_ENTITY] = "invalid_temperature_entity"
+            humidity_entity = user_input.get(CONF_HUMIDITY_ENTITY)
+            if humidity_entity not in (None, "") and humidity_entity not in humidity_entities:
+                errors[CONF_HUMIDITY_ENTITY] = "invalid_humidity_entity"
+            if not errors:
+                # Keep options not exposed in this form (including future keys).
+                options = {**self.entry.options, **user_input}
+                # Legacy nested preset aliases override flat fields at runtime.
+                # Keep the representation and unknown keys, updating aliases for
+                # sliders submitted by this form so edits take effect.
+                nested = options.get(CONF_HVAC_MODES)
+                if isinstance(nested, Mapping):
+                    nested = dict(nested)
+                    label_to_id = {label: preset_id for preset_id, label in PRESET_LABELS.items()}
+                    for key in nested:
+                        try:
+                            preset_id = label_to_id[key] if key in label_to_id else int(key)
+                        except (TypeError, ValueError):
+                            continue
+                        flat_key = PRESET_TEMPERATURE_KEYS.get(preset_id)
+                        if flat_key in user_input:
+                            nested[key] = user_input[flat_key]
+                    options[CONF_HVAC_MODES] = nested
+                # An omitted optional field means the user cleared it. Persist the
+                # absence explicitly so the original entry.data cannot revive it.
+                options[CONF_HUMIDITY_ENTITY] = humidity_entity or None
+                return self.async_create_entry(title="", data=options)
+
+        def current_value(key: str) -> Any:
+            if user_input is not None:
+                return user_input.get(key)
+            return self._get_source_value(key)
 
         # ─────────────────────────────────────────────
         # HVAC mode temperature sliders
@@ -87,6 +141,24 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
         # General tuning and limit options.
         # Preset sliders are appended below so the form uses one schema.
         schema_data = {
+                vol.Required(
+                    CONF_TEMPERATURE_ENTITY,
+                    description={"suggested_value": current_value(CONF_TEMPERATURE_ENTITY)},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor", include_entities=temperature_entities,
+                    )
+                ),
+                # Suggested values prefill the UI without re-inserting a deleted
+                # field during Voluptuous validation, unlike default=.
+                vol.Optional(
+                    CONF_HUMIDITY_ENTITY,
+                    description={"suggested_value": current_value(CONF_HUMIDITY_ENTITY)},
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor", include_entities=humidity_entities,
+                    )
+                ),
                 vol.Optional(
                     CONF_DEFAULT_PRESET,
                     default=self._get_option_value(CONF_DEFAULT_PRESET, DEFAULT_PRESET),
@@ -162,4 +234,5 @@ class PWMClimateOptionsFlowHandler(config_entries.OptionsFlow):
         return self.async_show_form(
             step_id="init",
             data_schema=schema,
+            errors=errors,
         )

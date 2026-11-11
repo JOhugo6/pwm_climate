@@ -5,10 +5,8 @@ from typing import Any
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import CONF_NAME
 from homeassistant.core import callback
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import selector
 
 from .const import (
@@ -39,6 +37,7 @@ from .const import (
     PRESET_NAMES,
 )
 from .options_flow import PWMClimateOptionsFlowHandler
+from .source_helpers import measurement_entities
 
 
 class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -62,11 +61,16 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
         # Build the list of eligible temperature sensors for the selector.
         temperature_entities = self._get_temperature_entities()
+        humidity_entities = measurement_entities(self.hass, "humidity", "%")
 
         if user_input is not None:
             # Validate that the selected sensor is really a temperature entity.
             if user_input[CONF_TEMPERATURE_ENTITY] not in temperature_entities:
                 errors[CONF_TEMPERATURE_ENTITY] = "invalid_temperature_entity"
+
+            humidity_entity = user_input.get(CONF_HUMIDITY_ENTITY)
+            if humidity_entity not in (None, "") and humidity_entity not in humidity_entities:
+                errors[CONF_HUMIDITY_ENTITY] = "invalid_humidity_entity"
 
             if not errors:
                 return self.async_create_entry(
@@ -128,6 +132,7 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selector.EntitySelector(
                         selector.EntitySelectorConfig(
                             domain="sensor",
+                            include_entities=humidity_entities,
                         )
                     ),
 
@@ -212,36 +217,4 @@ class PWMClimateConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     def _get_temperature_entities(self) -> list[str]:
-        # Filter sensor entities by device_class or unit_of_measurement.
-        registry = er.async_get(self.hass)
-        registry_entries = {
-            entry.entity_id: entry
-            for entry in registry.entities.values()
-            if entry.domain == "sensor"
-        }
-
-        # Merge registry entities and runtime states to catch both.
-        entities: set[str] = set(registry_entries)
-        entities.update(state.entity_id for state in self.hass.states.async_all("sensor"))
-
-        # Keep only entities that look like temperature sensors.
-        valid_entities: list[str] = []
-        for entity_id in sorted(entities):
-            entry = registry_entries.get(entity_id)
-            state = self.hass.states.get(entity_id)
-            if self._is_temperature_sensor(entry, state):
-                valid_entities.append(entity_id)
-
-        return valid_entities
-
-    @staticmethod
-    def _is_temperature_sensor(entry: Any | None, state: Any | None) -> bool:
-        # Accept device_class temperature or unit of measurement in C.
-        device_class = entry.device_class if entry and entry.device_class else None
-        unit = None
-
-        if state:
-            device_class = state.attributes.get("device_class", device_class)
-            unit = state.attributes.get("unit_of_measurement")
-
-        return device_class == SensorDeviceClass.TEMPERATURE or unit == "°C"
+        return measurement_entities(self.hass, "temperature", "°C")

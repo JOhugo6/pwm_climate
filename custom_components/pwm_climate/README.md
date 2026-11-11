@@ -15,7 +15,7 @@ For the full project documentation, see the repository [README](../../README.md)
 | Platform | `climate` |
 | Setup | UI config flow |
 | Minimum Home Assistant | `2024.1.0` |
-| Manifest version | `0.1.1` |
+| Manifest version | `0.1.2` |
 | License | Apache License 2.0 |
 
 ## Supported Output Entities
@@ -47,8 +47,20 @@ Optional setup fields:
 - PWM period in seconds
 - Target temperature per preset
 
-The options flow lets you update tuning values and preset temperatures after
-setup. YAML configuration is not required.
+The options flow (Settings -> Devices & services -> PWM Climate Controller ->
+Configure) lets you change the temperature source and optional humidity source
+independently, plus tuning and preset temperatures. Temperature accepts sensors
+with temperature device class or °C unit. Humidity accepts humidity device class
+or classless % unit. Clear humidity to remove its source permanently, including
+after restart. Saving applies immediately without deleting the climate entity or
+restarting Home Assistant, preserving its identity, output, other saved options,
+HVAC mode and manual target. Invalid new temperature clears the reading and
+forces zero heat demand; invalid new humidity clears its display. YAML
+configuration is not required.
+
+Existing humidity sources selected by older releases remain usable while the
+source still exists as a sensor, even without humidity metadata. New choices
+are limited to humidity measurements.
 
 ## Control Summary
 

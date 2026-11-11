@@ -10,23 +10,23 @@
           "humidity_entity": "Humidity sensor entity (optional)",
           "output_entity": "Output entity (percentage)",
           "default_preset": "Default preset",
-
           "min_temperature": "Minimum temperature",
           "max_temperature": "Maximum temperature",
           "temperature_step": "Temperature step",
           "kp": "Proportional gain (Kp)",
-
           "hvac_auto_temperature": "Target temperature - Auto",
           "hvac_comfort_temperature": "Target temperature - Comfort",
           "hvac_standby_temperature": "Target temperature - Standby",
           "hvac_economy_temperature": "Target temperature - Economy",
           "hvac_building_protection_temperature": "Target temperature - Building protection",
-
           "pwm_period": "PWM period (seconds)",
-
           "hvac_modes": "HVAC modes and target temperatures"
         }
       }
+    },
+    "error": {
+      "invalid_temperature_entity": "Select a temperature sensor (temperature device class or °C unit).",
+      "invalid_humidity_entity": "Select a humidity sensor (humidity device class or % unit without another device class)."
     }
   },
   "options": {
@@ -44,9 +44,16 @@
           "hvac_comfort_temperature": "Target temperature - Comfort",
           "hvac_standby_temperature": "Target temperature - Standby",
           "hvac_economy_temperature": "Target temperature - Economy",
-          "hvac_building_protection_temperature": "Target temperature - Building protection"
-        }
+          "hvac_building_protection_temperature": "Target temperature - Building protection",
+          "temperature_entity": "Temperature sensor entity",
+          "humidity_entity": "Humidity sensor entity (optional)"
+        },
+        "description": "Change measurement sources, tuning and presets. Clear the optional humidity sensor to stop displaying humidity. Saving applies the settings immediately."
       }
+    },
+    "error": {
+      "invalid_temperature_entity": "Select a temperature sensor (temperature device class or °C unit).",
+      "invalid_humidity_entity": "Select a humidity sensor (humidity device class or % unit without another device class)."
     }
   }
 }

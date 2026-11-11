@@ -665,6 +665,8 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
         if self._is_removing:
             return
 
+        if event.data.get("entity_id", self._temperature_entity_id) != self._temperature_entity_id:
+            return
         old_state: State | None = event.data.get("old_state")
         new_state: State | None = event.data.get("new_state")
         if new_state is None:
@@ -740,6 +742,11 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
             return
 
         event_data = event.data if isinstance(event.data, Mapping) else {}
+        if not self._humidity_sensor_entity_id or (
+            event_data.get("entity_id", self._humidity_sensor_entity_id)
+            != self._humidity_sensor_entity_id
+        ):
+            return
         old_state: State | None = event_data.get("old_state")
         new_state: State | None = event_data.get("new_state")
         if new_state is None:
@@ -1037,6 +1044,8 @@ class PWMClimateController(ClimateEntity, RestoreEntity):
                     humidity_entity_id,
                 )
                 self._humidity_sensor_entity_id = humidity_entity_id
+                # A replacement must never display the previous source's value.
+                self._attr_current_humidity = None
                 self._async_sync_current_humidity_from_state(
                     hass.states.get(self._humidity_sensor_entity_id)
                 )

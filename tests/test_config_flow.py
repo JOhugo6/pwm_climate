@@ -174,3 +174,34 @@ def test_default_preset_translation_keys_exist(language: str) -> None:
 
     assert translation["config"]["step"]["user"]["data"]["default_preset"]
     assert translation["options"]["step"]["init"]["data"]["default_preset"]
+
+
+@pytest.mark.parametrize("humidity,accepted", [
+    ("sensor.humidity", True), ("sensor.unit_humidity", True),
+    ("sensor.battery", False), ("sensor.energy", False),
+])
+def test_setup_validates_humidity_measurements_consistently(humidity, accepted):
+    flow = _build_flow(entries={}, states=[
+        State("sensor.temperature", attributes={"unit_of_measurement": "\u00b0C"}),
+        State("sensor.humidity", attributes={"device_class": "humidity"}),
+        State("sensor.unit_humidity", attributes={"unit_of_measurement": "%"}),
+        State("sensor.battery", attributes={"device_class": "battery", "unit_of_measurement": "%"}),
+        State("sensor.energy", attributes={"unit_of_measurement": "kWh"}),
+    ])
+    result = _run(flow.async_step_user({
+        config_flow.CONF_NAME: "Study PWM",
+        config_flow.CONF_TEMPERATURE_ENTITY: "sensor.temperature",
+        config_flow.CONF_HUMIDITY_ENTITY: humidity,
+    }))
+    assert result["type"] == ("create_entry" if accepted else "form")
+    if not accepted:
+        assert result["errors"][config_flow.CONF_HUMIDITY_ENTITY] == "invalid_humidity_entity"
+
+
+@pytest.mark.parametrize("language", ["en", "cs"])
+def test_source_field_labels_and_errors_translated_for_both_flows(language):
+    translation = _load_translation(language)
+    for flow, step in (("config", "user"), ("options", "init")):
+        for source in ("temperature_entity", "humidity_entity"):
+            assert translation[flow]["step"][step]["data"][source]
+            assert translation[flow]["error"][f"invalid_{source}"]
